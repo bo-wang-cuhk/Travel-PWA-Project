@@ -2,9 +2,8 @@ import type { User } from '../types'
 
 /**
  * Built-in modules that are available without discovering them from the TREK
- * server. Keep this list deliberately limited to the modules enabled by a fresh
- * TREK installation. Server-only integrations and optional modules remain off
- * until they have a local repository implementation of their own.
+ * server. This personal PWA exposes the complete built-in navigation set while
+ * leaving server-only integrations and collaboration providers disabled.
  */
 export const STANDALONE_ADDONS = [
   { id: 'packing', name: 'Lists', type: 'trip', icon: 'ListChecks', enabled: true },
@@ -12,6 +11,8 @@ export const STANDALONE_ADDONS = [
   { id: 'documents', name: 'Documents', type: 'trip', icon: 'FileText', enabled: true },
   { id: 'vacay', name: 'Vacay', type: 'global', icon: 'CalendarDays', enabled: true },
   { id: 'atlas', name: 'Atlas', type: 'global', icon: 'Globe', enabled: true },
+  { id: 'journey', name: 'Journey', type: 'global', icon: 'Compass', enabled: true },
+  { id: 'collections', name: 'Collections', type: 'global', icon: 'Bookmark', enabled: true },
 ] as const
 
 /**

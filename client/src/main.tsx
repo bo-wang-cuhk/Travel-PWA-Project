@@ -66,7 +66,7 @@ async function bootstrap(): Promise<void> {
     useSettingsStore.setState({ isLoaded: true })
     // Navigation and trip feature tabs are driven by the add-on catalog. In the
     // server build it comes from /api/addons/enabled; the static GitHub build has
-    // no such endpoint, so seed the same modules a fresh TREK install enables.
+    // no such endpoint, so seed the modules exposed by the personal PWA.
     useAddonStore.setState({ addons: [...STANDALONE_ADDONS], bagTracking: false, loaded: true })
     usePluginStore.setState({ plugins: [], loaded: true })
     await reopenForUser(LOCAL_USER.id)

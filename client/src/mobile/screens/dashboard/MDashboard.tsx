@@ -27,6 +27,7 @@ import { useMobileDashOrder, useMobileDashVisibility, MobileDashWidget } from '.
 import MNewTripSheet from './MNewTripSheet'
 import type { MobileDashToken } from '@trek/shared'
 import { STANDALONE_MODE } from '../../../config/runtimeMode'
+import { publicAssetUrl } from '../../../utils/publicAssetUrl'
 
 // Localized short date for the pills; the year only shows when it isn't the
 // current one (same rule as the desktop cards).
@@ -230,7 +231,7 @@ export default function MDashboard(): React.ReactElement {
           className="flex flex-none items-center gap-[7px]"
         >
           <span className="flex h-[38px] w-[38px] items-center justify-center rounded-[11px] bg-[#101013]">{/* theme-lint-disable — brand tile stays black in both themes */}
-            <img src="/icons/icon-white.svg" alt="" className="block h-[22px] w-[22px]" />
+            <img src={publicAssetUrl('icons/icon-white.svg')} alt="" className="block h-[22px] w-[22px]" />
           </span>
         </button>
         <div className="min-w-0 flex-1" />
