@@ -71,7 +71,7 @@ async function bootstrap(): Promise<void> {
 
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
-      <BrowserRouter>
+      <BrowserRouter basename={import.meta.env.BASE_URL}>
         {/* Outermost net: catches App itself and TranslationProvider, which every
             boundary further in sits below. Its fallback is untranslated on purpose
             — if the provider is the thing that broke, t() would echo raw keys. */}
