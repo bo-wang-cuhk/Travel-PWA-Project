@@ -36,7 +36,7 @@ import { startConnectivityProbe } from './sync/connectivity'
 import { requestPersistentStorage } from './sync/persistentStorage'
 import ErrorBoundary, { RootErrorFallback } from './components/shared/ErrorBoundary'
 import { installGlobalErrorHandlers } from './utils/globalErrorHandlers'
-import { STANDALONE_MODE, LOCAL_USER } from './config/runtimeMode'
+import { STANDALONE_MODE, LOCAL_USER, STANDALONE_ADDONS } from './config/runtimeMode'
 import { useAuthStore } from './store/authStore'
 import { useSettingsStore } from './store/settingsStore'
 import { useAddonStore } from './store/addonStore'
@@ -64,7 +64,10 @@ async function bootstrap(): Promise<void> {
       placesEnrichEnabled: false,
     })
     useSettingsStore.setState({ isLoaded: true })
-    useAddonStore.setState({ addons: [], bagTracking: false, loaded: true })
+    // Navigation and trip feature tabs are driven by the add-on catalog. In the
+    // server build it comes from /api/addons/enabled; the static GitHub build has
+    // no such endpoint, so seed the same modules a fresh TREK install enables.
+    useAddonStore.setState({ addons: [...STANDALONE_ADDONS], bagTracking: false, loaded: true })
     usePluginStore.setState({ plugins: [], loaded: true })
     await reopenForUser(LOCAL_USER.id)
   }
