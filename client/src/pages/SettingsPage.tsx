@@ -1,5 +1,5 @@
 import React from 'react'
-import { Settings, SlidersHorizontal, Paintbrush, Map, Bell, Plug, CloudOff, User, Info, Blocks } from 'lucide-react'
+import { Settings, SlidersHorizontal, Paintbrush, Map, Bell, Plug, CloudOff, User, Info, Blocks, Cloud } from 'lucide-react'
 import { useTranslation } from '../i18n'
 import PageShell from '../components/Layout/PageShell'
 import PageSidebar, { type PageSidebarTab } from '../components/Layout/PageSidebar'
@@ -12,6 +12,7 @@ import AccountTab from '../components/Settings/AccountTab'
 import AboutTab from '../components/Settings/AboutTab'
 import OfflineTab from '../components/Settings/OfflineTab'
 import PluginSettingsTab from '../components/Settings/PluginSettingsTab'
+import SyncSettingsTab from '../components/Settings/SyncSettingsTab'
 import { usePluginStore } from '../store/pluginStore'
 import { useSettings } from './settings/useSettings'
 
@@ -39,6 +40,7 @@ function SettingsPageDesktop(): React.ReactElement {
       ? [{ id: 'plugins', label: t('settings.tabs.plugins'), icon: Blocks }]
       : []),
     { id: 'offline', label: t('settings.tabs.offline'), icon: CloudOff },
+    { id: 'sync', label: 'GitHub Sync', icon: Cloud },
     { id: 'account', label: t('settings.tabs.account'), icon: User },
     // About is where the project lives: what TREK is, where to report a bug,
     // where to support it. A customer of a hosted instance is the audience for
@@ -93,6 +95,7 @@ function SettingsPageDesktop(): React.ReactElement {
             {activeTab === 'integrations' && hasIntegrations && <IntegrationsTab />}
             {activeTab === 'plugins' && hasPlugins && <PluginSettingsTab />}
             {activeTab === 'offline' && <OfflineTab />}
+            {activeTab === 'sync' && <SyncSettingsTab />}
             {activeTab === 'account' && <AccountTab />}
             {activeTab === 'about' && appVersion && <AboutTab appVersion={appVersion} />}
           </PageSidebar>

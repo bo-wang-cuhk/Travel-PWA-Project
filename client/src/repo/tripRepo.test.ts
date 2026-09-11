@@ -55,8 +55,11 @@ describe('tripRepo local IndexedDB data source', () => {
       day_count: 5,
       is_owner: 1,
       is_archived: 0,
+      deleted_at: null,
     })
+    expect(result.trip.sync_id).toMatch(/^[0-9a-f-]{36}$/i)
     expect(await offlineDb.trips.get(-4)).toEqual(result.trip)
+    expect(await offlineDb.syncOutbox.get(`trip:${result.trip.sync_id}`)).toMatchObject({ operation: 'upsert', status: 'pending' })
   })
 
   it('FE-REPO-TRIP-005: updates only supplied fields and persists them', async () => {
@@ -76,13 +79,16 @@ describe('tripRepo local IndexedDB data source', () => {
     expect((await offlineDb.trips.get(-1))?.is_archived).toBe(0)
   })
 
-  it('FE-REPO-TRIP-007: delete removes the trip and its cached child rows', async () => {
+  it('FE-REPO-TRIP-007: delete writes a tombstone and queues it without destroying related data', async () => {
     await offlineDb.trips.put(buildTrip({ id: -1 }))
     await offlineDb.days.put(buildDay({ id: 5, trip_id: -1 }))
     await tripRepo.delete(-1)
 
-    expect(await offlineDb.trips.get(-1)).toBeUndefined()
-    expect(await offlineDb.days.where('trip_id').equals(-1).count()).toBe(0)
+    const deleted = await offlineDb.trips.get(-1)
+    expect(deleted?.deleted_at).toBeTruthy()
+    expect(await offlineDb.days.where('trip_id').equals(-1).count()).toBe(1)
+    expect(await offlineDb.syncOutbox.get(`trip:${deleted!.sync_id}`)).toMatchObject({ operation: 'delete', status: 'pending' })
+    expect((await tripRepo.list()).trips).toEqual([])
   })
 
   it('FE-REPO-TRIP-008: data survives closing and reopening the database', async () => {

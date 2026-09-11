@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronLeft,
   CloudOff,
+  Cloud,
   Info,
   Map,
   Palette,
@@ -28,6 +29,7 @@ import MSettingsNotifications from './MSettingsNotifications'
 import MSettingsIntegrations from './MSettingsIntegrations'
 import MSettingsAccount from './MSettingsAccount'
 import MSettingsAbout from './MSettingsAbout'
+import MSettingsSync from './MSettingsSync'
 
 interface SectionTab {
   id: string
@@ -57,6 +59,7 @@ export default function MSettings() {
     ...(hasIntegrations ? [{ id: 'integrations', label: t('settings.tabs.integrations'), icon: Plug }] : []),
     ...(hasPlugins ? [{ id: 'plugins', label: t('settings.tabs.plugins'), icon: Puzzle }] : []),
     { id: 'offline', label: t('settings.tabs.offline'), icon: CloudOff },
+    { id: 'sync', label: 'GitHub Sync', icon: Cloud },
     { id: 'account', label: t('settings.tabs.account'), icon: User },
     // Same call as the desktop page: About is about the project — what TREK is,
     // where to file a bug, where to support it — and a customer of a hosted
@@ -122,6 +125,7 @@ export default function MSettings() {
       {/* Per-plugin settings still reuse the existing responsive tab. */}
       {active.id === 'plugins' && hasPlugins && <MSettingsPlugins />}
       {active.id === 'offline' && <MSettingsOffline />}
+      {active.id === 'sync' && <MSettingsSync />}
       {active.id === 'account' && <MSettingsAccount />}
       {active.id === 'about' && appVersion && <MSettingsAbout appVersion={appVersion} />}
 

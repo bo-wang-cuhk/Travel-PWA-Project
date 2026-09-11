@@ -1,5 +1,15 @@
 import Dexie, { type Table } from 'dexie';
 import type { Trip, Day, Place, PackingItem, TodoItem, BudgetItem, Reservation, TripFile, Accommodation, TripMember, Tag, Category } from '../types';
+import type { LocalTripRecord, StoredTripRecord } from '../domain/tripSyncModel';
+import type {
+  EntitySyncMetaRecord,
+  SyncConflictRecord,
+  SyncCredentialRecord,
+  SyncOutboxRecord,
+  SyncProviderConfigRecord,
+  SyncStateRecord,
+} from '../sync/types';
+import { randomId } from '../utils/randomId';
 
 /** TripMember enriched with tripId so we can index by trip. */
 export interface CachedTripMember extends TripMember {
@@ -131,7 +141,7 @@ function initialDbName(): string {
 }
 
 class TrekOfflineDb extends Dexie {
-  trips!: Table<Trip, number>;
+  trips!: Table<StoredTripRecord, number>;
   days!: Table<Day, number>;
   places!: Table<Place, number>;
   packingItems!: Table<PackingItem, number>;
@@ -148,6 +158,12 @@ class TrekOfflineDb extends Dexie {
   blobCache!: Table<BlobCacheEntry, string>;
   importFiles!: Table<ImportSourceFile, [string, string]>;
   appMeta!: Table<AppMeta, string>;
+  syncOutbox!: Table<SyncOutboxRecord, string>;
+  entitySyncMeta!: Table<EntitySyncMetaRecord, string>;
+  syncState!: Table<SyncStateRecord, string>;
+  syncConflicts!: Table<SyncConflictRecord, string>;
+  syncProviderConfig!: Table<SyncProviderConfigRecord, string>;
+  syncCredentials!: Table<SyncCredentialRecord, string>;
 
   constructor(name: string = ANON_DB_NAME) {
     super(name);
@@ -193,6 +209,47 @@ class TrekOfflineDb extends Dexie {
     // seed a one-time operation, even after the user deletes its trip).
     this.version(5).stores({
       appMeta: 'key',
+    });
+
+    // v6: local-first Trip identity plus provider-neutral sync bookkeeping.
+    // Existing numeric ids remain the local compatibility key while every row
+    // gains a stable UUID used by GitHub and future cloud providers.
+    this.version(6).stores({
+      trips: 'id, &sync_id, deleted_at, updated_at',
+      syncOutbox: 'key, [entityType+entityId], status, changedAt',
+      entitySyncMeta: 'key, [entityType+entityId], status',
+      syncState: 'providerId, status',
+      syncConflicts: 'key, [entityType+entityId], detectedAt',
+      syncProviderConfig: 'providerId',
+      syncCredentials: 'providerId',
+    }).upgrade(async tx => {
+      const now = new Date().toISOString();
+      await tx.table('trips').toCollection().modify((row: Partial<LocalTripRecord>) => {
+        if (!row.sync_id) row.sync_id = randomId();
+        if (!row.created_at) row.created_at = now;
+        if (!row.updated_at) row.updated_at = row.created_at;
+        if (row.deleted_at === undefined) row.deleted_at = null;
+      });
+      const trips = await tx.table('trips').toArray() as LocalTripRecord[];
+      await tx.table('syncOutbox').bulkPut(trips.map(trip => ({
+        key: `trip:${trip.sync_id}`,
+        entityType: 'trip',
+        entityId: trip.sync_id,
+        operation: trip.deleted_at ? 'delete' : 'upsert',
+        changedAt: Date.parse(trip.updated_at) || Date.now(),
+        status: 'pending',
+        attempts: 0,
+        lastError: null,
+      })));
+      await tx.table('entitySyncMeta').bulkPut(trips.map(trip => ({
+        key: `trip:${trip.sync_id}`,
+        entityType: 'trip',
+        entityId: trip.sync_id,
+        status: 'pending',
+        remoteVersion: null,
+        lastSyncedAt: null,
+        lastError: null,
+      })));
     });
   }
 }
@@ -251,8 +308,21 @@ export async function deleteCurrentUserDb(): Promise<void> {
 
 // ── Bulk upsert helpers ────────────────────────────────────────────────────────
 
-export async function upsertTrip(trip: Trip): Promise<void> {
-  await offlineDb.trips.put(trip);
+export function asLocalTripRecord(trip: Trip | LocalTripRecord): LocalTripRecord {
+  const now = new Date().toISOString();
+  const current = trip as Partial<LocalTripRecord>;
+  return {
+    ...trip,
+    sync_id: current.sync_id || randomId(),
+    created_at: trip.created_at || now,
+    updated_at: trip.updated_at || trip.created_at || now,
+    deleted_at: current.deleted_at ?? null,
+  } as LocalTripRecord;
+}
+
+export async function upsertTrip(trip: Trip | LocalTripRecord): Promise<void> {
+  const existing = await offlineDb.trips.get(trip.id);
+  await offlineDb.trips.put(asLocalTripRecord({ ...existing, ...trip } as LocalTripRecord));
 }
 
 export async function upsertDays(days: Day[]): Promise<void> {

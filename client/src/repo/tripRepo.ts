@@ -1,6 +1,9 @@
-import { offlineDb, clearTripData } from '../db/offlineDb'
+import { offlineDb } from '../db/offlineDb'
 import type { Trip } from '../types'
 import type { ActiveTripResponse, TripCreateRequest, TripUpdateRequest } from '@trek/shared'
+import type { LocalTripRecord } from '../domain/tripSyncModel'
+import { randomId } from '../utils/randomId'
+import { markLocalChange } from '../sync/localChangeRepository'
 
 export interface LocalTripOwner {
   id: number
@@ -27,9 +30,10 @@ function tripFromCreate(
   data: TripCreateRequest,
   owner: LocalTripOwner | undefined,
   now: string,
-): Trip {
+): LocalTripRecord {
   return {
     id,
+    sync_id: randomId(),
     user_id: owner?.id ?? 0,
     title: data.title,
     description: data.description ?? null,
@@ -41,6 +45,7 @@ function tripFromCreate(
     reminder_days: data.reminder_days ?? 3,
     created_at: now,
     updated_at: now,
+    deleted_at: null,
     day_count: inclusiveDayCount(data.start_date, data.end_date) ?? data.day_count ?? 7,
     place_count: 0,
     is_owner: 1,
@@ -99,7 +104,7 @@ function pickActive(trips: Trip[]): Trip | null {
 export const tripRepo = {
   async list(): Promise<{ trips: Trip[]; archivedTrips: Trip[] }> {
     if (import.meta.env.DEV && import.meta.env.MODE !== 'test') await ensureDevelopmentSeed()
-    const all = await offlineDb.trips.toArray()
+    const all = (await offlineDb.trips.toArray()).filter(t => !t.deleted_at)
     return {
       trips: all.filter(t => !t.is_archived),
       archivedTrips: all.filter(t => t.is_archived),
@@ -112,7 +117,7 @@ export const tripRepo = {
    * user on the dashboard whenever the launch has no network.
    */
   async active(): Promise<ActiveTripResponse> {
-    const all = await offlineDb.trips.toArray()
+    const all = (await offlineDb.trips.toArray()).filter(t => !t.deleted_at)
     const trip = pickActive(all.filter(t => !t.is_archived))
     return {
       trip: trip
@@ -123,28 +128,32 @@ export const tripRepo = {
 
   async get(tripId: number | string): Promise<{ trip: Trip }> {
     const trip = await offlineDb.trips.get(Number(tripId))
-    if (!trip) throw new Error('Trip not found in local database')
+    if (!trip || trip.deleted_at) throw new Error('Trip not found in local database')
     return { trip }
   },
 
-  async create(data: TripCreateRequest, owner?: LocalTripOwner): Promise<{ trip: Trip }> {
-    return offlineDb.transaction('rw', offlineDb.trips, async () => {
+  async create(data: TripCreateRequest, owner?: LocalTripOwner): Promise<{ trip: LocalTripRecord }> {
+    return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
       const trip = tripFromCreate(await nextLocalTripId(), data, owner, new Date().toISOString())
       await offlineDb.trips.add(trip)
+      await markLocalChange('trip', trip.sync_id, 'upsert')
       return { trip }
     })
   },
 
-  async update(tripId: number | string, data: TripUpdateRequest): Promise<{ trip: Trip }> {
+  async update(tripId: number | string, data: TripUpdateRequest): Promise<{ trip: LocalTripRecord }> {
     const id = Number(tripId)
-    return offlineDb.transaction('rw', offlineDb.trips, async () => {
+    return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
       const current = await offlineDb.trips.get(id)
-      if (!current) throw new Error('Trip not found in local database')
+      if (!current || current.deleted_at) throw new Error('Trip not found in local database')
       const { date_shift_mode: _dateShiftMode, ...patch } = data
       void _dateShiftMode
-      const trip: Trip = {
+      const trip: LocalTripRecord = {
         ...current,
         ...patch,
+        sync_id: current.sync_id || randomId(),
+        created_at: current.created_at || new Date().toISOString(),
+        deleted_at: current.deleted_at ?? null,
         is_archived: patch.is_archived == null
           ? current.is_archived
           : Number(Boolean(patch.is_archived)),
@@ -155,21 +164,28 @@ export const tripRepo = {
         updated_at: new Date().toISOString(),
       }
       await offlineDb.trips.put(trip)
+      await markLocalChange('trip', trip.sync_id, 'upsert')
       return { trip }
     })
   },
 
   async delete(tripId: number | string): Promise<void> {
     const id = Number(tripId)
-    if (!await offlineDb.trips.get(id)) throw new Error('Trip not found in local database')
-    await clearTripData(id)
+    await offlineDb.transaction('rw', [offlineDb.trips, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
+      const trip = await offlineDb.trips.get(id)
+      if (!trip || trip.deleted_at) throw new Error('Trip not found in local database')
+      const now = new Date().toISOString()
+      const syncId = trip.sync_id || randomId()
+      await offlineDb.trips.put({ ...trip, sync_id: syncId, created_at: trip.created_at || now, deleted_at: now, updated_at: now })
+      await markLocalChange('trip', syncId, 'delete')
+    })
   },
 
-  archive(tripId: number | string): Promise<{ trip: Trip }> {
+  archive(tripId: number | string): Promise<{ trip: LocalTripRecord }> {
     return this.update(tripId, { is_archived: 1 })
   },
 
-  unarchive(tripId: number | string): Promise<{ trip: Trip }> {
+  unarchive(tripId: number | string): Promise<{ trip: LocalTripRecord }> {
     return this.update(tripId, { is_archived: 0 })
   },
 }

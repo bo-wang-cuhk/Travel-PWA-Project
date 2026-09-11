@@ -365,6 +365,7 @@ describe('offlineDb — connection proxy', () => {
     })
     await legacy.open()
     await legacy.table('blobCache').put({ url: '/legacy.pdf', blob: new Blob(['abc']), mime: 'application/pdf', cachedAt: 1 })
+    await legacy.table('trips').put(buildTrip({ id: 700 }))
     legacy.close()
 
     await reopenForUser(55)
@@ -372,6 +373,10 @@ describe('offlineDb — connection proxy', () => {
     const row = await offlineDb.blobCache.get('/legacy.pdf')
     expect(row!.tripId).toBe(-1)
     expect(typeof row!.bytes).toBe('number')
+    const migratedTrip = await offlineDb.trips.get(700)
+    expect(migratedTrip?.sync_id).toMatch(/^[0-9a-f-]{36}$/i)
+    expect(migratedTrip?.deleted_at).toBeNull()
+    expect(await offlineDb.syncOutbox.get(`trip:${migratedTrip!.sync_id}`)).toMatchObject({ status: 'pending', operation: 'upsert' })
   })
 })
 

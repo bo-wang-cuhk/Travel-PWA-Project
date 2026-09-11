@@ -31,6 +31,7 @@ import { SystemNoticeHost } from './components/SystemNotices/SystemNoticeHost.js
 import './pages/Trips/noticeActions.js'
 import { managedRoutes } from './managed'
 import { STANDALONE_MODE } from './config/runtimeMode'
+import { registerLocalFirstSyncTriggers, unregisterLocalFirstSyncTriggers } from './sync/syncScheduler'
 
 // Every page below loads on demand. The entry chunk used to carry all twenty of
 // them eagerly, so opening /dashboard also paid for the planner, the journal, the
@@ -378,6 +379,12 @@ export default function App() {
     if (STANDALONE_MODE) return
     registerSyncTriggers()
     return () => unregisterSyncTriggers()
+  }, [])
+
+  useEffect(() => {
+    if (!STANDALONE_MODE) return
+    registerLocalFirstSyncTriggers()
+    return () => unregisterLocalFirstSyncTriggers()
   }, [])
 
   const location = useLocation()
