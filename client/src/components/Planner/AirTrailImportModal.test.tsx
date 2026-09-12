@@ -5,10 +5,26 @@ import { http, HttpResponse } from 'msw';
 import { server } from '../../../tests/helpers/msw/server';
 import { useAuthStore } from '../../store/authStore';
 import { useTripStore } from '../../store/tripStore';
+import { useSettingsStore } from '../../store/settingsStore';
 import { resetAllStores, seedStore } from '../../../tests/helpers/store';
 import { buildUser, buildTrip, buildReservation } from '../../../tests/helpers/factories';
 import type { AirtrailFlight } from '@trek/shared';
 import AirTrailImportModal, { detectConnections } from './AirTrailImportModal';
+
+vi.mock('../../repo/reservationRepo', () => ({
+  reservationRepo: {
+    list: vi.fn(async (tripId: number) => {
+      const response = await fetch(`/api/trips/${tripId}/reservations`);
+      if (!response.ok) throw new Error('Failed to load reservations');
+      return response.json();
+    }),
+    delete: vi.fn(async (tripId: number, id: number) => {
+      const response = await fetch(`/api/trips/${tripId}/reservations/${id}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error('Failed to delete reservation');
+      return response.json();
+    }),
+  },
+}));
 
 const toasts: Array<[string, string]> = [];
 vi.mock('../shared/Toast', () => ({
@@ -98,6 +114,7 @@ describe('AirTrailImportModal', () => {
   beforeEach(() => {
     toasts.length = 0;
     resetAllStores();
+    seedStore(useSettingsStore, { settings: { ...useSettingsStore.getState().settings, language: 'en' } });
     seedStore(useAuthStore, { user: buildUser(), isAuthenticated: true });
     seedStore(useTripStore, {
       trip: buildTrip({ id: 1, start_date: '2026-08-01', end_date: '2026-08-10' }),

@@ -78,7 +78,7 @@ export const placeRepo = {
     const localTripId = Number(tripId)
     await offlineDb.transaction(
       'rw',
-      [offlineDb.trips, offlineDb.places, offlineDb.assignments, offlineDb.syncOutbox, offlineDb.entitySyncMeta],
+      [offlineDb.trips, offlineDb.places, offlineDb.assignments, offlineDb.accommodations, offlineDb.reservations, offlineDb.syncOutbox, offlineDb.entitySyncMeta],
       async () => {
         const [trip, stored] = await Promise.all([offlineDb.trips.get(localTripId), offlineDb.places.get(Number(id))])
         if (!trip || trip.deleted_at || !trip.sync_id) throw new Error('Trip not found in local database')
@@ -106,6 +106,20 @@ export const placeRepo = {
             await offlineDb.assignments.put(changed)
             await markLocalChange('assignment', changed.sync_id, 'upsert')
           }
+        }
+        const stays = await offlineDb.accommodations.where('place_sync_id').equals(place.sync_id).toArray()
+        for (const stay of stays.filter(item => !item.deleted_at)) {
+          await offlineDb.accommodations.put({ ...stay, deleted_at: now, updated_at: now })
+          if (stay.sync_id) await markLocalChange('accommodation', stay.sync_id, 'delete')
+        }
+        const reservations = await offlineDb.reservations.where('trip_id').equals(localTripId).toArray()
+        for (const reservation of reservations.filter(item => !item.deleted_at && (item.place_id === place.id || stays.some(stay => stay.id === Number(item.accommodation_id))))) {
+          const linkedStay = stays.some(stay => stay.id === Number(reservation.accommodation_id))
+          const changed = { ...reservation,
+            ...(reservation.place_id === place.id ? { place_id: null, place_sync_id: null } : {}),
+            ...(linkedStay ? { accommodation_id: null, accommodation_sync_id: null } : {}), updated_at: now }
+          await offlineDb.reservations.put(changed)
+          if (changed.sync_id) await markLocalChange('reservation', changed.sync_id, 'upsert')
         }
       },
     )

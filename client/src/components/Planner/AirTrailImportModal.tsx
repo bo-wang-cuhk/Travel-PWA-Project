@@ -5,7 +5,8 @@ import { Plane, X, Check } from 'lucide-react'
 import type { AirtrailFlight, AirtrailImportResult } from '@trek/shared'
 import { useTranslation } from '../../i18n'
 import { useToast } from '../shared/Toast'
-import { airtrailApi, reservationsApi } from '../../api/client'
+import { airtrailApi } from '../../api/client'
+import { reservationRepo } from '../../repo/reservationRepo'
 import { useTripStore } from '../../store/tripStore'
 import { parseReservationMetadata } from '../../utils/flightLegs'
 
@@ -209,7 +210,7 @@ export default function AirTrailImportModal({ isOpen, onClose, tripId, pushUndo 
           const linked = useTripStore.getState().reservations.filter(
             r => r.external_source === 'airtrail' && r.external_id && imported.includes(String(r.external_id)),
           )
-          await Promise.all(linked.map(r => reservationsApi.delete(tripId, r.id).catch(() => {})))
+          await Promise.all(linked.map(r => reservationRepo.delete(tripId, r.id).catch(() => {})))
           await loadReservations(tripId)
         })
         toast.success(t('reservations.airtrail.imported', { count: imported.length }))

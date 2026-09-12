@@ -5,6 +5,7 @@ import { assignmentRepo } from './assignmentRepo'
 import { dayRepo } from './dayRepo'
 import { placeRepo } from './placeRepo'
 import { tripRepo } from './tripRepo'
+import { reservationRepo } from './reservationRepo'
 
 beforeEach(async () => { await clearAll() })
 afterEach(() => { vi.restoreAllMocks() })
@@ -71,6 +72,14 @@ describe('assignmentRepo local IndexedDB data source', () => {
     expect((await offlineDb.assignments.get(first.assignment.id))?.deleted_at).toBeTruthy()
     expect((await assignmentRepo.listByDay(days[0].id))[0]).toMatchObject({ id: second.assignment.id, order_index: 0 })
     expect(await offlineDb.syncOutbox.get(`assignment:${(await offlineDb.assignments.get(first.assignment.id))?.sync_id}`)).toMatchObject({ operation: 'delete' })
+  })
+
+  it('deleting an Assignment unlinks its Reservation without deleting the booking', async () => {
+    const { trip, days, a } = await fixture()
+    const { assignment } = await assignmentRepo.create(trip.id, days[0].id, a.id)
+    const { reservation } = await reservationRepo.create(trip.id, { title: 'Museum ticket', assignment_id: assignment.id })
+    await assignmentRepo.delete(trip.id, days[0].id, assignment.id)
+    expect(await offlineDb.reservations.get(reservation.id)).toMatchObject({ assignment_id: null, assignment_sync_id: null, deleted_at: null })
   })
 
   it('rejects incomplete reorder and cross-Trip relations', async () => {

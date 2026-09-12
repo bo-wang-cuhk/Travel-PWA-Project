@@ -8,7 +8,7 @@ import { useToast } from '../../components/shared/Toast'
 import { Map, Ticket, PackageCheck, Wallet, FolderOpen, Users, Train } from 'lucide-react'
 import { resolvePluginIcon } from '../../components/shared/PluginIcon'
 import { useTranslation, translateApiError } from '../../i18n'
-import { addonsApi, accommodationsApi, authApi, tripsApi, healthApi, airtrailApi, mapsApi } from '../../api/client'
+import { addonsApi, authApi, tripsApi, healthApi, airtrailApi, mapsApi } from '../../api/client'
 import { parsedItemToDraft, isTransportItem, isUnplaceableItem, type BookingReviewDraft } from '../../components/Planner/parsedItemToDraft'
 import type { BookingImportPreviewItem } from '@trek/shared'
 import { accommodationRepo } from '../../repo/accommodationRepo'
@@ -867,7 +867,7 @@ export function useTripPlanner() {
         setShowReservationModal(false)
         setEditingReservation(null)
         if (data.type === 'hotel') {
-          accommodationsApi.list(tripId).then(d => setTripAccommodations(d.accommodations || [])).catch(() => {})
+          accommodationRepo.list(tripId).then(d => setTripAccommodations(d.accommodations || [])).catch(() => {})
         }
         return r
       } else {
@@ -879,7 +879,7 @@ export function useTripPlanner() {
         if ((data as Record<string, unknown>).create_budget_entry) await tripActions.loadBudgetItems?.(tripId)
         // Refresh accommodations if hotel was created
         if (data.type === 'hotel') {
-          accommodationsApi.list(tripId).then(d => setTripAccommodations(d.accommodations || [])).catch(() => {})
+          accommodationRepo.list(tripId).then(d => setTripAccommodations(d.accommodations || [])).catch(() => {})
         }
         return r
       }
@@ -913,7 +913,7 @@ export function useTripPlanner() {
       await tripActions.deleteReservation(tripId, id)
       toast.success(t('trip.toast.deleted'))
       // Refresh accommodations in case a hotel booking was deleted
-      accommodationsApi.list(tripId).then(d => setTripAccommodations(d.accommodations || [])).catch(() => {})
+      accommodationRepo.list(tripId).then(d => setTripAccommodations(d.accommodations || [])).catch(() => {})
     }
     catch (err: unknown) { toast.error(err instanceof Error ? err.message : t('common.unknownError')) }
   }
@@ -1041,7 +1041,7 @@ export function useTripPlanner() {
     setImportReviewActive(false)
     setShowReservationModal(false); setEditingReservation(null); setReservationPrefill(null)
     setShowTransportModal(false); setEditingTransport(null); setTransportPrefill(null); setTransportModalDayId(null)
-    accommodationsApi.list(tripId).then(d => setTripAccommodations(d.accommodations || [])).catch(() => {})
+    accommodationRepo.list(tripId).then(d => setTripAccommodations(d.accommodations || [])).catch(() => {})
     // Imported bookings auto-create their linked costs server-side, but the saving client
     // suppresses its own budget:created echo (X-Socket-Id) — so reload the budget items here
     // to surface those expenses without a manual page refresh.

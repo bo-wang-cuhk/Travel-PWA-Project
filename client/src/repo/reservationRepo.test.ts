@@ -1,55 +1,52 @@
-// FE-REPO-RESV-001 to FE-REPO-RESV-004
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import 'fake-indexeddb/auto'
-import { http, HttpResponse } from 'msw'
-import { server } from '../../tests/helpers/msw/server'
+import { clearAll, offlineDb } from '../db/offlineDb'
 import { reservationRepo } from './reservationRepo'
-import { offlineDb, clearAll } from '../db/offlineDb'
-import { buildReservation } from '../../tests/helpers/factories'
-
-function setOnline(v: boolean): void {
-  Object.defineProperty(navigator, 'onLine', { value: v, writable: true, configurable: true })
-}
 
 beforeEach(async () => {
   await clearAll()
-  setOnline(true)
+  await offlineDb.trips.put({ id: -1, sync_id: 'trip-a', name: 'Trip', start_date: '2026-01-01', end_date: '2026-01-02', created_at: 'x', updated_at: 'x', deleted_at: null } as never)
+  await offlineDb.days.put({ id: -1, sync_id: 'day-a', trip_id: -1, trip_sync_id: 'trip-a', day_number: 1, date: '2026-01-01', created_at: 'x', updated_at: 'x', deleted_at: null } as never)
+  await offlineDb.places.put({ id: -1, sync_id: 'place-a', trip_id: -1, trip_sync_id: 'trip-a', name: 'Hotel', created_at: 'x', updated_at: 'x', deleted_at: null } as never)
 })
 
-afterEach(() => {
-  vi.restoreAllMocks()
-})
-
-describe('reservationRepo.list', () => {
-  it('FE-REPO-RESV-001: online — returns REST reservations and caches them', async () => {
-    const reservation = buildReservation({ id: 71, trip_id: 14, title: 'Sushi Bar' })
-    server.use(http.get('/api/trips/14/reservations', () => HttpResponse.json({ reservations: [reservation] })))
-
-    const result = await reservationRepo.list(14)
-    expect(result.reservations.map(r => r.title)).toEqual(['Sushi Bar'])
-
-    await new Promise(r => setTimeout(r, 0))
-    expect((await offlineDb.reservations.get(71))!.title).toBe('Sushi Bar')
+describe('reservationRepo local-first', () => {
+  it('creates, updates and lists from IndexedDB', async () => {
+    const created = await reservationRepo.create(-1, { title: 'Train', type: 'train', day_id: -1 })
+    expect(created.reservation.id).toBeLessThan(0)
+    expect((await offlineDb.syncOutbox.where('entityType').equals('reservation').count())).toBe(1)
+    const updated = await reservationRepo.update(-1, created.reservation.id, { status: 'confirmed' })
+    expect(updated.reservation.status).toBe('confirmed')
+    expect((await reservationRepo.list(-1)).reservations.map(item => item.title)).toEqual(['Train'])
   })
 
-  it('FE-REPO-RESV-002: offline — returns only this trip\'s cached reservations', async () => {
-    await offlineDb.reservations.bulkPut([
-      buildReservation({ id: 72, trip_id: 14 }),
-      buildReservation({ id: 73, trip_id: 15 }),
-    ])
-    setOnline(false)
-
-    const result = await reservationRepo.list('14')
-    expect(result.reservations.map(r => r.id)).toEqual([72])
+  it('soft deletes and preserves a tombstone', async () => {
+    const created = await reservationRepo.create(-1, { title: 'Flight', type: 'flight' })
+    await reservationRepo.delete(-1, created.reservation.id)
+    expect((await reservationRepo.list(-1)).reservations).toEqual([])
+    expect((await offlineDb.reservations.get(created.reservation.id))!.deleted_at).toBeTruthy()
   })
 
-  it('FE-REPO-RESV-003: offline with an empty cache — returns an empty list', async () => {
-    setOnline(false)
-    expect((await reservationRepo.list(404)).reservations).toEqual([])
+  it('soft deleting a hotel Reservation also tombstones its linked Accommodation', async () => {
+    const created = await reservationRepo.create(-1, {
+      title: 'Hotel stay', type: 'hotel',
+      create_accommodation: { place_id: -1, start_day_id: -1, end_day_id: -1 },
+    } as never)
+    const accommodationId = Number(created.reservation.accommodation_id)
+    await reservationRepo.delete(-1, created.reservation.id)
+    expect((await offlineDb.accommodations.get(accommodationId))?.deleted_at).toBeTruthy()
   })
 
-  it('FE-REPO-RESV-004: a 500 is rethrown, not masked by the cache', async () => {
-    server.use(http.get('/api/trips/14/reservations', () => HttpResponse.json({ error: 'boom' }, { status: 500 })))
-    await expect(reservationRepo.list(14)).rejects.toThrow()
+  it('stores per-Day positions locally', async () => {
+    const created = await reservationRepo.create(-1, { title: 'Bus', type: 'bus', day_id: -1 })
+    await reservationRepo.updatePositions(-1, [{ id: created.reservation.id, day_plan_position: 2.5 }], -1)
+    expect((await offlineDb.reservations.get(created.reservation.id))!.day_positions).toEqual({ '-1': 2.5 })
+  })
+
+  it('creates a linked Accommodation for a hotel in the same local workflow', async () => {
+    const created = await reservationRepo.create(-1, { title: 'Hotel', type: 'hotel', create_accommodation: { place_id: -1, start_day_id: -1, end_day_id: -1 } } as never)
+    expect(created.reservation.accommodation_id).toBeLessThan(0)
+    expect(await offlineDb.accommodations.count()).toBe(1)
+    expect(await offlineDb.syncOutbox.get(`reservation:${(await offlineDb.reservations.get(created.reservation.id))!.sync_id}`)).toBeDefined()
   })
 })

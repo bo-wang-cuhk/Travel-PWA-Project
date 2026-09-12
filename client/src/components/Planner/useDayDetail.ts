@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { weatherApi, accommodationsApi } from '../../api/client'
+import { weatherApi } from '../../api/client'
+import { accommodationRepo } from '../../repo/accommodationRepo'
 import { isDayInAccommodationRange } from '../../utils/dayOrder'
 
 /** Day-detail data + accommodation logic: weather load, accommodations list,
@@ -32,7 +33,7 @@ export function useDayDetail(day: any, days: any, tripId: any, lat: any, lng: an
 
   useEffect(() => {
     if (!tripId) return
-    accommodationsApi.list(tripId)
+    accommodationRepo.list(tripId)
       .then(data => {
         setAccommodations(data.accommodations || [])
         const allForDay = (data.accommodations || []).filter(a =>
@@ -53,7 +54,7 @@ export function useDayDetail(day: any, days: any, tripId: any, lat: any, lng: an
   const handleSaveAccommodation = async () => {
     if (!hotelForm.place_id) return
     try {
-      const data = await accommodationsApi.create(tripId, {
+      const data = await accommodationRepo.create(tripId, {
         place_id: hotelForm.place_id,
         start_day_id: hotelDayRange.start,
         end_day_id: hotelDayRange.end,
@@ -78,7 +79,7 @@ export function useDayDetail(day: any, days: any, tripId: any, lat: any, lng: an
   const updateAccommodationField = async (field, value) => {
     if (!accommodation) return
     try {
-      const data = await accommodationsApi.update(tripId, accommodation.id, { [field]: value || null })
+      const data = await accommodationRepo.update(tripId, accommodation.id, { [field]: value || null })
       setAccommodation(data.accommodation)
       onAccommodationChange?.()
     } catch {}
@@ -87,7 +88,7 @@ export function useDayDetail(day: any, days: any, tripId: any, lat: any, lng: an
   const handleRemoveAccommodation = async () => {
     if (!accommodation) return
     try {
-      await accommodationsApi.delete(tripId, accommodation.id)
+      await accommodationRepo.delete(tripId, accommodation.id)
       const updated = accommodations.filter(a => a.id !== accommodation.id)
       setAccommodations(updated)
       setDayAccommodations(updated.filter(a =>

@@ -16,6 +16,17 @@ export interface GitHubManifestAssignment extends GitHubManifestDay {
   placeId: string
 }
 
+export interface GitHubManifestAccommodation extends GitHubManifestDay {
+  placeId: string | null
+  startDayId: string
+  endDayId: string
+}
+
+export interface GitHubManifestReservation extends GitHubManifestDay {
+  dayId: string | null
+  accommodationId: string | null
+}
+
 export interface GitHubDaysFile {
   schemaVersion: 1
   tripId: string
@@ -37,6 +48,20 @@ export interface GitHubAssignmentsFile {
   assignments: import('../../../domain/assignmentSyncModel').SyncedAssignment[]
 }
 
+export interface GitHubAccommodationsFile {
+  schemaVersion: 1
+  tripId: string
+  updatedAt: string
+  accommodations: import('../../../domain/accommodationSyncModel').SyncedAccommodation[]
+}
+
+export interface GitHubReservationsFile {
+  schemaVersion: 1
+  tripId: string
+  updatedAt: string
+  reservations: import('../../../domain/reservationSyncModel').SyncedReservation[]
+}
+
 export interface GitHubManifest {
   schemaVersion: 1
   updatedAt: string
@@ -45,6 +70,8 @@ export interface GitHubManifest {
   days?: Record<string, GitHubManifestDay>
   places?: Record<string, GitHubManifestPlace>
   assignments?: Record<string, GitHubManifestAssignment>
+  accommodations?: Record<string, GitHubManifestAccommodation>
+  reservations?: Record<string, GitHubManifestReservation>
 }
 
 export const EMPTY_MANIFEST: GitHubManifest = {
@@ -54,4 +81,6 @@ export const EMPTY_MANIFEST: GitHubManifest = {
   days: {},
   places: {},
   assignments: {},
+  accommodations: {},
+  reservations: {},
 }

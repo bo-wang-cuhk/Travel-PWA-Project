@@ -189,7 +189,7 @@ export const assignmentRepo = {
   async delete(tripId: number | string, dayId: number | string, assignmentId: number | string): Promise<void> {
     const localTripId = Number(tripId)
     const localDayId = Number(dayId)
-    await offlineDb.transaction('rw', [offlineDb.assignments, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
+    await offlineDb.transaction('rw', [offlineDb.assignments, offlineDb.reservations, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
       const stored = await offlineDb.assignments.get(Number(assignmentId)) as LocalAssignmentRecord | undefined
       if (!stored || stored.deleted_at || stored.trip_id !== localTripId || stored.day_id !== localDayId) {
         throw new Error('Assignment not found in local database')
@@ -198,6 +198,13 @@ export const assignmentRepo = {
       const deleted = { ...stored, deleted_at: now, updated_at: now }
       await offlineDb.assignments.put(deleted)
       await markLocalChange('assignment', deleted.sync_id, 'delete')
+      const linked = (await offlineDb.reservations.where('trip_id').equals(localTripId).toArray())
+        .filter(reservation => !reservation.deleted_at && reservation.assignment_id === stored.id)
+      for (const reservation of linked) {
+        const changed = { ...reservation, assignment_id: null, assignment_sync_id: null, updated_at: now }
+        await offlineDb.reservations.put(changed)
+        if (changed.sync_id) await markLocalChange('reservation', changed.sync_id, 'upsert')
+      }
       await reindex(localDayId, now)
     })
   },

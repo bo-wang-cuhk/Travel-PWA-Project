@@ -7,7 +7,7 @@ import { avatarSrc } from '../../utils/avatarSrc'
 import { safeHttpUrl } from '../../utils/safeUrl'
 import { ChevronDown, ChevronRight, ChevronUp, Compass, Navigation, RotateCcw, ExternalLink, Clock, Pencil, GripVertical, Ticket, Plus, FileText, Trash2, Car, Lock, Hotel, Footprints, Route as RouteIcon, Bookmark, StickyNote, TramFront, Zap } from 'lucide-react'
 import { type PickedPlace } from './TransitSearchPanel'
-import { reservationsApi } from '../../api/client'
+import { reservationRepo } from '../../repo/reservationRepo'
 import { dayRepo } from '../../repo/dayRepo'
 import { assignmentRepo } from '../../repo/assignmentRepo'
 import { calculateRouteWithLegs, optimizeRoute, generateGoogleMapsUrl, generateCoMapsUrl, type NamedWaypoint } from '../Map/RouteCalculator'
@@ -456,7 +456,7 @@ function useDayPlanSidebar(props: DayPlanSidebarProps) {
     // day shows an order that only exists in this tab.
     // The ids stay marked as initialised: the effect reruns on every reservations
     // change, so clearing them here would retry the same failing write in a loop.
-    reservationsApi.updatePositions(tripId, positions).catch(() => {
+    reservationRepo.updatePositions(tripId, positions).catch(() => {
       useTripStore.setState(state => ({
         reservations: state.reservations.map(r => {
           const p = before.find(x => x.id === r.id)
@@ -814,7 +814,7 @@ function useDayPlanSidebar(props: DayPlanSidebarProps) {
       if (assignmentIds.length) await onReorder(dayId, assignmentIds)
       if (transportUpdates.length) {
         onRouteRefresh?.()
-        await reservationsApi.updatePositions(tripId, transportUpdates, dayId)
+        await reservationRepo.updatePositions(tripId, transportUpdates, dayId)
         for (const tu of transportUpdates) dropRollback(tu.id)
       }
       for (const n of noteUpdates) {

@@ -3,6 +3,8 @@ import type { SyncedTrip } from '../../../domain/tripSyncModel'
 import type { SyncedDay } from '../../../domain/daySyncModel'
 import type { SyncedPlace } from '../../../domain/placeSyncModel'
 import type { SyncedAssignment } from '../../../domain/assignmentSyncModel'
+import type { SyncedAccommodation } from '../../../domain/accommodationSyncModel'
+import type { SyncedReservation } from '../../../domain/reservationSyncModel'
 import { EMPTY_MANIFEST, type GitHubManifest } from './githubTypes'
 import { GitHubSyncProvider, RemoteAdvancedError } from './GitHubSyncProvider'
 
@@ -49,6 +51,19 @@ const assignment: SyncedAssignment = {
   dayId: day.id, placeId: place.id, orderIndex: 0, notes: 'Morning', assignmentTime: '09:00',
   assignmentEndTime: null, legTransportMode: 'walking', incomingLegTransportMode: null,
   createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-04T00:00:00.000Z', deletedAt: null,
+}
+const accommodation: SyncedAccommodation = {
+  schemaVersion: 1, id: '55555555-5555-4555-8555-555555555555', tripId: trip.id, placeId: place.id,
+  startDayId: day.id, endDayId: day.id, checkIn: '15:00', checkInEnd: null, checkOut: '11:00',
+  confirmation: 'ABC', notes: null, createdAt: day.createdAt, updatedAt: '2026-01-05T00:00:00.000Z', deletedAt: null,
+}
+const reservation: SyncedReservation = {
+  schemaVersion: 1, id: '66666666-6666-4666-8666-666666666666', tripId: trip.id, dayId: day.id,
+  endDayId: day.id, placeId: place.id, assignmentId: assignment.id, accommodationId: accommodation.id,
+  title: 'Hotel booking', reservationTime: null, reservationEndTime: null, location: null,
+  confirmationNumber: 'ABC', notes: null, url: null, status: 'confirmed', type: 'hotel', metadata: null,
+  needsReview: 0, ingestState: 'live', dayPlanPosition: null, dayPositions: null, endpoints: [],
+  createdAt: day.createdAt, updatedAt: '2026-01-06T00:00:00.000Z', deletedAt: null,
 }
 
 function response(value: unknown, status = 200): Response {
@@ -201,7 +216,7 @@ describe('GitHubSyncProvider', () => {
     ])
   })
 
-  it('pulls Place and Assignment files in dependency order', async () => {
+  it('pulls all Trip child files in dependency order', async () => {
     const placesPath = `trips/${trip.id}/places.json`
     const assignmentsPath = `trips/${trip.id}/assignments.json`
     const manifest: GitHubManifest = {
@@ -210,6 +225,8 @@ describe('GitHubSyncProvider', () => {
       days: { [day.id]: { path: `trips/${trip.id}/days.json`, tripId: trip.id, updatedAt: day.updatedAt, deletedAt: null, contentHash: 'day-v1' } },
       places: { [place.id]: { path: placesPath, tripId: trip.id, updatedAt: place.updatedAt, deletedAt: null, contentHash: 'place-v1' } },
       assignments: { [assignment.id]: { path: assignmentsPath, tripId: trip.id, dayId: day.id, placeId: place.id, updatedAt: assignment.updatedAt, deletedAt: null, contentHash: 'assignment-v1' } },
+      accommodations: { [accommodation.id]: { path: `trips/${trip.id}/accommodations.json`, tripId: trip.id, placeId: place.id, startDayId: day.id, endDayId: day.id, updatedAt: accommodation.updatedAt, deletedAt: null, contentHash: 'accommodation-v1' } },
+      reservations: { [reservation.id]: { path: `trips/${trip.id}/reservations.json`, tripId: trip.id, dayId: day.id, accommodationId: accommodation.id, updatedAt: reservation.updatedAt, deletedAt: null, contentHash: 'reservation-v1' } },
     }
     vi.spyOn(globalThis, 'fetch').mockImplementation(async input => {
       const url = String(input)
@@ -220,12 +237,14 @@ describe('GitHubSyncProvider', () => {
       if (url.includes(`/contents/trips/${trip.id}/days.json`)) return response(file({ schemaVersion: 1, tripId: trip.id, updatedAt: day.updatedAt, days: [day] }))
       if (url.includes(`/contents/${placesPath}`)) return response(file({ schemaVersion: 1, tripId: trip.id, updatedAt: place.updatedAt, places: [place] }))
       if (url.includes(`/contents/${assignmentsPath}`)) return response(file({ schemaVersion: 1, tripId: trip.id, updatedAt: assignment.updatedAt, assignments: [assignment] }))
+      if (url.includes(`/contents/trips/${trip.id}/accommodations.json`)) return response(file({ schemaVersion: 1, tripId: trip.id, updatedAt: accommodation.updatedAt, accommodations: [accommodation] }))
+      if (url.includes(`/contents/trips/${trip.id}/reservations.json`)) return response(file({ schemaVersion: 1, tripId: trip.id, updatedAt: reservation.updatedAt, reservations: [reservation] }))
       throw new Error(`Unexpected request: ${url}`)
     })
     const provider = new GitHubSyncProvider(config, 'secret')
     await provider.connect()
     const result = await provider.pull()
-    expect(result.changes.map(change => change.entityType)).toEqual(['trip', 'day', 'place', 'assignment'])
+    expect(result.changes.map(change => change.entityType)).toEqual(['trip', 'day', 'place', 'assignment', 'accommodation', 'reservation'])
     expect(result.changes[3]).toMatchObject({ entityId: assignment.id, payload: assignment })
   })
 
@@ -257,5 +276,30 @@ describe('GitHubSyncProvider', () => {
     expect(JSON.parse(String(treeRequest.init.body)).tree.map((entry: { path: string }) => entry.path)).toEqual([
       `trips/${trip.id}/places.json`, `trips/${trip.id}/assignments.json`, 'manifest.json',
     ])
+  })
+
+  it('patches Trip-scoped Accommodation and Reservation files', async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = []; let blob = 0
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init = {}) => {
+      const url = String(input); requests.push({ url, init })
+      if (url.endsWith('/repos/me/travel-data')) return response({ permissions: { push: true } })
+      if (url.includes('/git/ref/heads/main')) return response({ object: { sha: 'head-1' } })
+      if (url.includes('/git/commits/head-1')) return response({ tree: { sha: 'tree-1' } })
+      if (url.includes('/contents/manifest.json')) return response(file({ ...EMPTY_MANIFEST }))
+      if (url.includes('/accommodations.json') || url.includes('/reservations.json')) return response({ message: 'Not Found' }, 404)
+      if (url.endsWith('/git/blobs')) return response({ sha: `blob-${++blob}` })
+      if (url.endsWith('/git/trees')) return response({ sha: 'tree-2' })
+      if (url.endsWith('/git/commits')) return response({ sha: 'commit-2' })
+      if (url.includes('/git/refs/heads/main')) return response({})
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const provider = new GitHubSyncProvider(config, 'secret'); await provider.connect()
+    const result = await provider.push([
+      { entityType: 'accommodation', entityId: accommodation.id, operation: 'upsert', payload: accommodation },
+      { entityType: 'reservation', entityId: reservation.id, operation: 'upsert', payload: reservation },
+    ], 'head-1')
+    expect(result.versions).toMatchObject({ [accommodation.id]: `${accommodation.updatedAt}:active`, [reservation.id]: `${reservation.updatedAt}:active` })
+    const tree = JSON.parse(String(requests.find(item => item.url.endsWith('/git/trees'))!.init.body)).tree
+    expect(tree.map((entry: { path: string }) => entry.path)).toEqual([`trips/${trip.id}/accommodations.json`, `trips/${trip.id}/reservations.json`, 'manifest.json'])
   })
 })

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTripStore } from '../../../../store/tripStore'
 import { useRouteCalculation } from '../../../../hooks/useRouteCalculation'
-import { reservationsApi, weatherApi } from '../../../../api/client'
+import { weatherApi } from '../../../../api/client'
+import { reservationRepo } from '../../../../repo/reservationRepo'
 import { assignmentRepo } from '../../../../repo/assignmentRepo'
 import { usePluginStore } from '../../../../store/pluginStore'
 import { getDayBookendHotels } from '../../../../utils/dayOrder'
@@ -199,7 +200,7 @@ export function useMPlanTimeline(planner: TripPlanner) {
         await tripActions.updateReservation(tripId, rid, { metadata: newMeta as unknown as string })
       }
       if (assignmentIds.length) await tripActions.reorderAssignments(tripId, dayId, assignmentIds)
-      if (transportUpdates.length) await reservationsApi.updatePositions(tripId, transportUpdates, dayId)
+      if (transportUpdates.length) await reservationRepo.updatePositions(tripId, transportUpdates, dayId)
       for (const n of noteUpdates) {
         await tripActions.updateDayNote(tripId, dayId, n.id, { sort_order: n.sort_order })
       }

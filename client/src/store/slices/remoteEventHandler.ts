@@ -2,7 +2,7 @@ import type { StoreApi } from 'zustand'
 import type { TrekWsTripEventName } from '@trek/shared'
 import type { TripStoreState } from '../tripStore'
 import type { Assignment, Place, Day, DayNote, PackingItem, TodoItem, BudgetItem, BudgetItemMember, Reservation, Trip, TripFile, WebSocketEvent } from '../../types'
-import { offlineDb, upsertAssignmentsFromDays, upsertDays, upsertPlaces } from '../../db/offlineDb'
+import { offlineDb, upsertAssignmentsFromDays, upsertDays, upsertPlaces, upsertReservations } from '../../db/offlineDb'
 import { useAuthStore } from '../authStore'
 import { mergeAssignmentPlace } from './placesSlice'
 
@@ -69,7 +69,7 @@ const putReservation: DexieWriter = async payload => {
   // The same empty ping the appliers above handle; without this the write
   // throws and only the swallowed catch keeps it quiet.
   if (!payload.reservation) return
-  await offlineDb.reservations.put(payload.reservation as Reservation)
+  await upsertReservations([payload.reservation as Reservation])
 }
 const putTripFile: DexieWriter = async payload => {
   await offlineDb.tripFiles.put(payload.file as TripFile)
@@ -146,7 +146,11 @@ export const DEXIE_WRITERS: Partial<Record<TrekWsTripEventName, DexieWriter>> = 
   'reservation:created': putReservation,
   'reservation:updated': putReservation,
   'reservation:deleted': async payload => {
-    await offlineDb.reservations.delete(payload.reservationId as number)
+    const current = await offlineDb.reservations.get(payload.reservationId as number)
+    if (current) {
+      const now = new Date().toISOString()
+      await offlineDb.reservations.put({ ...current, deleted_at: now, updated_at: now })
+    }
   },
 
   // ── Trip ─────────────────────────────────────────────────────────────────

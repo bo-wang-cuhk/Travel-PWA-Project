@@ -232,7 +232,7 @@ describe('offlineDb — blob cache budget', () => {
   })
 })
 
-describe('offlineDb — clearTripData', () => {
+  describe('offlineDb — clearTripData', () => {
   it('FE-DB-OFFLINE-018: clears disposable caches but retains local-first Trip, Day and Place rows', async () => {
     await upsertTrip(buildTrip({ id: 1 }))
     await upsertTrip(buildTrip({ id: 2 }))
@@ -257,9 +257,9 @@ describe('offlineDb — clearTripData', () => {
     expect(await offlineDb.packingItems.count()).toBe(0)
     expect(await offlineDb.todoItems.count()).toBe(0)
     expect(await offlineDb.budgetItems.count()).toBe(0)
-    expect(await offlineDb.reservations.count()).toBe(0)
+    expect(await offlineDb.reservations.count()).toBe(1)
     expect(await offlineDb.tripFiles.count()).toBe(0)
-    expect(await offlineDb.accommodations.count()).toBe(0)
+    expect(await offlineDb.accommodations.count()).toBe(1)
     expect(await offlineDb.tripMembers.count()).toBe(0)
     expect(await offlineDb.syncMeta.get(1)).toBeUndefined()
 
@@ -461,6 +461,29 @@ describe('offlineDb — connection proxy', () => {
     })
     expect((await offlineDb.days.get(722))?.assignments).toBeUndefined()
     expect(await offlineDb.syncOutbox.get(`assignment:${migratedAssignment!.sync_id}`)).toMatchObject({ status: 'pending' })
+  })
+
+  it('FE-DB-OFFLINE-032: upgrading v8 backfills Reservation and Accommodation UUID relations', async () => {
+    const name = 'trek-offline-u59', legacy = new Dexie(name)
+    legacy.version(8).stores({
+      trips: 'id, &sync_id, deleted_at, updated_at', days: 'id, &sync_id, trip_id, trip_sync_id, [trip_sync_id+day_number], deleted_at, updated_at',
+      places: 'id, &sync_id, trip_id, trip_sync_id, deleted_at, updated_at', assignments: 'id, &sync_id, trip_id, trip_sync_id, day_id, day_sync_id, place_id, place_sync_id, [day_sync_id+order_index], deleted_at, updated_at',
+      reservations: 'id, trip_id', accommodations: 'id, trip_id', packingItems: 'id, trip_id', todoItems: 'id, trip_id', budgetItems: 'id, trip_id', tripFiles: 'id, trip_id',
+      tripMembers: '[tripId+id], tripId', tags: 'id', categories: 'id', mutationQueue: 'id, tripId, status, createdAt', syncMeta: 'tripId', blobCache: 'url, cachedAt, tripId',
+      importFiles: '[jobId+fileName], jobId, createdAt', appMeta: 'key', syncOutbox: 'key, [entityType+entityId], status, changedAt', entitySyncMeta: 'key, [entityType+entityId], status',
+      syncState: 'providerId, status', syncConflicts: 'key, [entityType+entityId], detectedAt', syncProviderConfig: 'providerId', syncCredentials: 'providerId',
+    })
+    await legacy.open()
+    await legacy.table('trips').put({ ...buildTrip({ id: 730 }), sync_id: 'trip-730', deleted_at: null })
+    await legacy.table('days').put({ ...buildDay({ id: 731, trip_id: 730 }), sync_id: 'day-731', trip_sync_id: 'trip-730', deleted_at: null })
+    await legacy.table('places').put({ ...buildPlace({ id: 732, trip_id: 730 }), sync_id: 'place-732', trip_sync_id: 'trip-730', deleted_at: null })
+    await legacy.table('accommodations').put({ id: 733, trip_id: 730, place_id: 732, start_day_id: 731, end_day_id: 731 })
+    await legacy.table('reservations').put({ ...buildReservation({ id: 734, trip_id: 730, day_id: 731, place_id: 732 }), accommodation_id: 733 })
+    legacy.close(); await reopenForUser(59)
+    const stay = await offlineDb.accommodations.get(733), reservation = await offlineDb.reservations.get(734)
+    expect(stay).toMatchObject({ trip_sync_id: 'trip-730', place_sync_id: 'place-732', start_day_sync_id: 'day-731', end_day_sync_id: 'day-731', deleted_at: null })
+    expect(reservation).toMatchObject({ trip_sync_id: 'trip-730', day_sync_id: 'day-731', place_sync_id: 'place-732', accommodation_sync_id: stay?.sync_id, deleted_at: null })
+    expect(await offlineDb.syncOutbox.get(`reservation:${reservation!.sync_id}`)).toMatchObject({ status: 'pending' })
   })
 })
 

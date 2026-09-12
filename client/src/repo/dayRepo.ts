@@ -151,7 +151,7 @@ export const dayRepo = {
     const id = Number(dayId)
     await offlineDb.transaction(
       'rw',
-      [offlineDb.trips, offlineDb.days, offlineDb.assignments, offlineDb.syncOutbox, offlineDb.entitySyncMeta],
+      [offlineDb.trips, offlineDb.days, offlineDb.assignments, offlineDb.accommodations, offlineDb.reservations, offlineDb.syncOutbox, offlineDb.entitySyncMeta],
       async () => {
         const [trip, stored] = await Promise.all([offlineDb.trips.get(localTripId), offlineDb.days.get(id)])
         if (!trip || trip.deleted_at || !trip.sync_id) throw new Error('Trip not found in local database')
@@ -165,6 +165,22 @@ export const dayRepo = {
           const tombstone = { ...assignment, deleted_at: now, updated_at: now }
           await offlineDb.assignments.put(tombstone)
           await markLocalChange('assignment', tombstone.sync_id, 'delete')
+        }
+        const stays = await offlineDb.accommodations.where('trip_id').equals(localTripId).toArray()
+        const removedStays = stays.filter(item => !item.deleted_at && (item.start_day_id === id || item.end_day_id === id))
+        for (const stay of removedStays) {
+          await offlineDb.accommodations.put({ ...stay, deleted_at: now, updated_at: now })
+          if (stay.sync_id) await markLocalChange('accommodation', stay.sync_id, 'delete')
+        }
+        const reservations = await offlineDb.reservations.where('trip_id').equals(localTripId).toArray()
+        for (const reservation of reservations.filter(item => !item.deleted_at && (item.day_id === id || item.end_day_id === id || removedStays.some(stay => stay.id === Number(item.accommodation_id))))) {
+          const linkedStay = removedStays.some(stay => stay.id === Number(reservation.accommodation_id))
+          const changed = { ...reservation,
+            ...(reservation.day_id === id ? { day_id: null, day_sync_id: null } : {}),
+            ...(reservation.end_day_id === id ? { end_day_id: null, end_day_sync_id: null } : {}),
+            ...(linkedStay ? { accommodation_id: null, accommodation_sync_id: null } : {}), updated_at: now }
+          await offlineDb.reservations.put(changed)
+          if (changed.sync_id) await markLocalChange('reservation', changed.sync_id, 'upsert')
         }
 
         const remaining = (await activeDays(localTripId)).filter(day => day.id !== id)

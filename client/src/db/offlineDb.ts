@@ -4,6 +4,8 @@ import type { LocalTripRecord, StoredTripRecord } from '../domain/tripSyncModel'
 import type { LocalDayRecord, StoredDayRecord } from '../domain/daySyncModel';
 import type { LocalPlaceRecord, StoredPlaceRecord } from '../domain/placeSyncModel';
 import type { LocalAssignmentRecord, StoredAssignmentRecord } from '../domain/assignmentSyncModel';
+import type { LocalAccommodationRecord, StoredAccommodationRecord } from '../domain/accommodationSyncModel';
+import type { LocalReservationRecord, StoredReservationRecord } from '../domain/reservationSyncModel';
 import type {
   EntitySyncMetaRecord,
   SyncConflictRecord,
@@ -151,9 +153,9 @@ class TrekOfflineDb extends Dexie {
   packingItems!: Table<PackingItem, number>;
   todoItems!: Table<TodoItem, number>;
   budgetItems!: Table<BudgetItem, number>;
-  reservations!: Table<Reservation, number>;
+  reservations!: Table<StoredReservationRecord, number>;
   tripFiles!: Table<TripFile, number>;
-  accommodations!: Table<Accommodation, number>;
+  accommodations!: Table<StoredAccommodationRecord, number>;
   tripMembers!: Table<CachedTripMember, [number, number]>;
   tags!: Table<Tag, number>;
   categories!: Table<Category, number>;
@@ -370,6 +372,73 @@ class TrekOfflineDb extends Dexie {
         })),
       ]);
     });
+
+    // v9: Reservation and Accommodation become local-first, preserving numeric
+    // ids only as UI compatibility keys and exporting UUID relationships.
+    this.version(9).stores({
+      reservations: 'id, &sync_id, trip_id, trip_sync_id, day_id, day_sync_id, accommodation_id, accommodation_sync_id, deleted_at, updated_at',
+      accommodations: 'id, &sync_id, trip_id, trip_sync_id, place_sync_id, start_day_sync_id, end_day_sync_id, deleted_at, updated_at',
+    }).upgrade(async tx => {
+      const now = new Date().toISOString();
+      const [trips, days, places, assignments] = await Promise.all([
+        tx.table('trips').toArray() as Promise<LocalTripRecord[]>,
+        tx.table('days').toArray() as Promise<LocalDayRecord[]>,
+        tx.table('places').toArray() as Promise<LocalPlaceRecord[]>,
+        tx.table('assignments').toArray() as Promise<LocalAssignmentRecord[]>,
+      ]);
+      const tripIds = new Map(trips.map(row => [row.id, row.sync_id]));
+      const dayIds = new Map(days.map(row => [row.id, row.sync_id]));
+      const placeIds = new Map(places.map(row => [row.id, row.sync_id]));
+      const assignmentIds = new Map(assignments.map(row => [row.id, row.sync_id]));
+
+      await tx.table('accommodations').toCollection().modify((row: Partial<LocalAccommodationRecord>) => {
+        if (!row.sync_id) row.sync_id = randomId();
+        if (!row.trip_sync_id) row.trip_sync_id = tripIds.get(Number(row.trip_id)) || `orphan:${row.trip_id}`;
+        if (row.place_sync_id === undefined) row.place_sync_id = row.place_id == null ? null : placeIds.get(Number(row.place_id)) || `orphan:${row.place_id}`;
+        if (!row.start_day_sync_id) row.start_day_sync_id = dayIds.get(Number(row.start_day_id)) || `orphan:${row.start_day_id}`;
+        if (!row.end_day_sync_id) row.end_day_sync_id = dayIds.get(Number(row.end_day_id)) || `orphan:${row.end_day_id}`;
+        if (!row.created_at) row.created_at = now;
+        if (!row.updated_at) row.updated_at = row.created_at;
+        if (row.deleted_at === undefined) row.deleted_at = null;
+      });
+      const accommodations = await tx.table('accommodations').toArray() as LocalAccommodationRecord[];
+      const accommodationIds = new Map(accommodations.map(row => [row.id, row.sync_id]));
+
+      await tx.table('reservations').toCollection().modify((row: Partial<LocalReservationRecord>) => {
+        if (!row.sync_id) row.sync_id = randomId();
+        if (!row.trip_sync_id) row.trip_sync_id = tripIds.get(Number(row.trip_id)) || `orphan:${row.trip_id}`;
+        if (row.day_sync_id === undefined) row.day_sync_id = row.day_id == null ? null : dayIds.get(Number(row.day_id)) || `orphan:${row.day_id}`;
+        if (row.end_day_sync_id === undefined) row.end_day_sync_id = row.end_day_id == null ? null : dayIds.get(Number(row.end_day_id)) || `orphan:${row.end_day_id}`;
+        if (row.place_sync_id === undefined) row.place_sync_id = row.place_id == null ? null : placeIds.get(Number(row.place_id)) || `orphan:${row.place_id}`;
+        if (row.assignment_sync_id === undefined) row.assignment_sync_id = row.assignment_id == null ? null : assignmentIds.get(Number(row.assignment_id)) || `orphan:${row.assignment_id}`;
+        if (row.accommodation_sync_id === undefined) row.accommodation_sync_id = row.accommodation_id == null ? null : accommodationIds.get(Number(row.accommodation_id)) || `orphan:${row.accommodation_id}`;
+        if (!row.created_at) row.created_at = now;
+        if (!row.updated_at) row.updated_at = row.created_at;
+        if (row.deleted_at === undefined) row.deleted_at = null;
+      });
+      const reservations = await tx.table('reservations').toArray() as LocalReservationRecord[];
+      const valid = (values: Array<string | null | undefined>) => values.every(value => !value?.startsWith('orphan:'));
+      const accommodationSyncable = (row: LocalAccommodationRecord) => valid([
+        row.trip_sync_id, row.place_sync_id, row.start_day_sync_id, row.end_day_sync_id,
+      ]);
+      const reservationSyncable = (row: LocalReservationRecord) => valid([
+        row.trip_sync_id, row.day_sync_id, row.end_day_sync_id, row.place_sync_id, row.assignment_sync_id, row.accommodation_sync_id,
+      ]);
+      const all = [
+        ...accommodations.map(row => ({ row, type: 'accommodation', ok: accommodationSyncable(row) })),
+        ...reservations.map(row => ({ row, type: 'reservation', ok: reservationSyncable(row) })),
+      ];
+      await tx.table('syncOutbox').bulkPut(all.filter(item => item.ok).map(({ row, type }) => ({
+        key: `${type}:${row.sync_id}`, entityType: type, entityId: row.sync_id,
+        operation: row.deleted_at ? 'delete' : 'upsert', changedAt: Date.parse(row.updated_at) || Date.now(),
+        status: 'pending', attempts: 0, lastError: null,
+      })));
+      await tx.table('entitySyncMeta').bulkPut(all.map(({ row, type, ok }) => ({
+        key: `${type}:${row.sync_id}`, entityType: type, entityId: row.sync_id,
+        status: ok ? 'pending' : 'error', remoteVersion: null, lastSyncedAt: null,
+        lastError: ok ? null : 'Reservation relation was not found during migration',
+      })));
+    });
   }
 }
 
@@ -525,7 +594,25 @@ export async function upsertBudgetItems(items: BudgetItem[]): Promise<void> {
 }
 
 export async function upsertReservations(items: Reservation[]): Promise<void> {
-  await offlineDb.reservations.bulkPut(items);
+  for (const item of items) {
+    const [existing, trip, day, endDay, place, assignment, accommodation] = await Promise.all([
+      offlineDb.reservations.get(item.id), offlineDb.trips.get(item.trip_id),
+      item.day_id == null ? undefined : offlineDb.days.get(item.day_id),
+      item.end_day_id == null ? undefined : offlineDb.days.get(item.end_day_id),
+      item.place_id == null ? undefined : offlineDb.places.get(item.place_id),
+      item.assignment_id == null ? undefined : offlineDb.assignments.get(item.assignment_id),
+      item.accommodation_id == null ? undefined : offlineDb.accommodations.get(Number(item.accommodation_id)),
+    ]);
+    const now = new Date().toISOString();
+    await offlineDb.reservations.put({ ...existing, ...item, sync_id: existing?.sync_id || randomId(),
+      trip_sync_id: existing?.trip_sync_id || trip?.sync_id || `orphan:${item.trip_id}`,
+      day_sync_id: item.day_id == null ? null : day?.sync_id || `orphan:${item.day_id}`,
+      end_day_sync_id: item.end_day_id == null ? null : endDay?.sync_id || `orphan:${item.end_day_id}`,
+      place_sync_id: item.place_id == null ? null : place?.sync_id || `orphan:${item.place_id}`,
+      assignment_sync_id: item.assignment_id == null ? null : assignment?.sync_id || `orphan:${item.assignment_id}`,
+      accommodation_sync_id: item.accommodation_id == null ? null : accommodation?.sync_id || `orphan:${item.accommodation_id}`,
+      created_at: existing?.created_at || item.created_at || now, updated_at: now, deleted_at: existing?.deleted_at ?? null });
+  }
 }
 
 export async function upsertTripFiles(files: TripFile[]): Promise<void> {
@@ -533,7 +620,20 @@ export async function upsertTripFiles(files: TripFile[]): Promise<void> {
 }
 
 export async function upsertAccommodations(items: Accommodation[]): Promise<void> {
-  await offlineDb.accommodations.bulkPut(items);
+  for (const item of items) {
+    const [existing, trip, place, start, end] = await Promise.all([
+      offlineDb.accommodations.get(item.id), offlineDb.trips.get(item.trip_id),
+      item.place_id == null ? undefined : offlineDb.places.get(item.place_id),
+      offlineDb.days.get(item.start_day_id), offlineDb.days.get(item.end_day_id),
+    ]);
+    const now = new Date().toISOString();
+    await offlineDb.accommodations.put({ ...existing, ...item, sync_id: existing?.sync_id || randomId(),
+      trip_sync_id: existing?.trip_sync_id || trip?.sync_id || `orphan:${item.trip_id}`,
+      place_sync_id: item.place_id == null ? null : place?.sync_id || `orphan:${item.place_id}`,
+      start_day_sync_id: start?.sync_id || `orphan:${item.start_day_id}`,
+      end_day_sync_id: end?.sync_id || `orphan:${item.end_day_id}`,
+      created_at: existing?.created_at || item.created_at || now, updated_at: now, deleted_at: existing?.deleted_at ?? null });
+  }
 }
 
 export async function upsertTripMembers(tripId: number, members: TripMember[]): Promise<void> {
@@ -657,23 +757,19 @@ export async function clearTripData(tripId: number): Promise<void> {
       offlineDb.packingItems,
       offlineDb.todoItems,
       offlineDb.budgetItems,
-      offlineDb.reservations,
       offlineDb.tripFiles,
-      offlineDb.accommodations,
       offlineDb.tripMembers,
       offlineDb.mutationQueue,
       offlineDb.syncMeta,
       offlineDb.blobCache,
     ],
     async () => {
-      // Trip, Day, Place and Assignment are working-database tables, not disposable download
+      // Migrated domain tables are the working database, not disposable download
       // caches. Clearing offline extras must never erase user-authored data.
       await offlineDb.packingItems.where('trip_id').equals(tripId).delete();
       await offlineDb.todoItems.where('trip_id').equals(tripId).delete();
       await offlineDb.budgetItems.where('trip_id').equals(tripId).delete();
-      await offlineDb.reservations.where('trip_id').equals(tripId).delete();
       await offlineDb.tripFiles.where('trip_id').equals(tripId).delete();
-      await offlineDb.accommodations.where('trip_id').equals(tripId).delete();
       await offlineDb.tripMembers.where('tripId').equals(tripId).delete();
       // Keep pending/syncing/conflict mutations — only purge dead 'failed' rows.
       await offlineDb.mutationQueue.where('tripId').equals(tripId).and(m => m.status === 'failed').delete();

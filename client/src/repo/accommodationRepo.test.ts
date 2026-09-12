@@ -1,87 +1,35 @@
-// FE-REPO-ACCOM-001 to FE-REPO-ACCOM-006
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import 'fake-indexeddb/auto'
-import { http, HttpResponse } from 'msw'
-import { server } from '../../tests/helpers/msw/server'
+import { clearAll, offlineDb } from '../db/offlineDb'
 import { accommodationRepo } from './accommodationRepo'
-import { offlineDb, clearAll } from '../db/offlineDb'
-import type { Accommodation } from '../types'
 
-function buildAccommodation(overrides: Partial<Accommodation> = {}): Accommodation {
-  return {
-    id: 1,
-    trip_id: 16,
-    start_day_id: 1,
-    end_day_id: 2,
-    check_in: '15:00',
-    check_out: '11:00',
-    place_name: 'Hotel Central',
-    ...overrides,
-  } as Accommodation
+async function seed() {
+  await offlineDb.trips.put({ id: -1, sync_id: 'trip-a', name: 'Trip', start_date: '2026-01-01', end_date: '2026-01-02', created_at: '2026-01-01', updated_at: '2026-01-01', deleted_at: null } as never)
+  await offlineDb.days.bulkPut([
+    { id: -1, sync_id: 'day-a', trip_id: -1, trip_sync_id: 'trip-a', day_number: 1, date: '2026-01-01', created_at: 'x', updated_at: 'x', deleted_at: null },
+    { id: -2, sync_id: 'day-b', trip_id: -1, trip_sync_id: 'trip-a', day_number: 2, date: '2026-01-02', created_at: 'x', updated_at: 'x', deleted_at: null },
+  ] as never)
+  await offlineDb.places.put({ id: -1, sync_id: 'place-a', trip_id: -1, trip_sync_id: 'trip-a', name: 'Hotel', address: 'Main St', created_at: 'x', updated_at: 'x', deleted_at: null } as never)
 }
 
-function setOnline(v: boolean): void {
-  Object.defineProperty(navigator, 'onLine', { value: v, writable: true, configurable: true })
-}
+beforeEach(async () => { await clearAll(); await seed() })
 
-beforeEach(async () => {
-  await clearAll()
-  setOnline(true)
-})
-
-afterEach(() => {
-  vi.restoreAllMocks()
-})
-
-describe('accommodationRepo.list', () => {
-  it('FE-REPO-ACCOM-001: online — returns REST accommodations and caches them', async () => {
-    const accommodation = buildAccommodation({ id: 81, trip_id: 16 })
-    server.use(http.get('/api/trips/16/accommodations', () => HttpResponse.json({ accommodations: [accommodation] })))
-
-    const result = await accommodationRepo.list(16)
-    expect(result.accommodations.map(a => a.id)).toEqual([81])
-
-    await new Promise(r => setTimeout(r, 0))
-    expect((await offlineDb.accommodations.get(81))!.place_name).toBe('Hotel Central')
+describe('accommodationRepo local-first', () => {
+  it('creates, projects and updates a stay without fetch', async () => {
+    const created = await accommodationRepo.create(-1, { place_id: -1, start_day_id: -1, end_day_id: -2, check_in: '15:00' })
+    expect(created.accommodation.place_name).toBe('Hotel')
+    expect((await offlineDb.syncOutbox.where('entityType').equals('accommodation').count())).toBe(1)
+    const updated = await accommodationRepo.update(-1, created.accommodation.id, { confirmation: 'ABC' })
+    expect(updated.accommodation.confirmation).toBe('ABC')
+    expect((await accommodationRepo.list(-1)).accommodations).toHaveLength(1)
   })
 
-  it('FE-REPO-ACCOM-002: online — a payload without the array does not break the upsert', async () => {
-    server.use(http.get('/api/trips/16/accommodations', () => HttpResponse.json({})))
-
-    const result = await accommodationRepo.list(16)
-    expect(result.accommodations).toBeUndefined()
-
-    await new Promise(r => setTimeout(r, 0))
-    expect(await offlineDb.accommodations.count()).toBe(0)
-  })
-
-  it('FE-REPO-ACCOM-003: offline — returns only this trip\'s cached accommodations', async () => {
-    await offlineDb.accommodations.bulkPut([
-      buildAccommodation({ id: 82, trip_id: 16 }),
-      buildAccommodation({ id: 83, trip_id: 17 }),
-    ])
-    setOnline(false)
-
-    const result = await accommodationRepo.list('16')
-    expect(result.accommodations.map(a => a.id)).toEqual([82])
-  })
-
-  it('FE-REPO-ACCOM-004: offline with an empty cache — returns an empty list', async () => {
-    setOnline(false)
-    expect((await accommodationRepo.list(404)).accommodations).toEqual([])
-  })
-
-  it('FE-REPO-ACCOM-005: a 500 is rethrown, not masked by the cache', async () => {
-    server.use(http.get('/api/trips/16/accommodations', () => HttpResponse.json({ error: 'boom' }, { status: 500 })))
-    await expect(accommodationRepo.list(16)).rejects.toThrow()
-  })
-
-  it('FE-REPO-ACCOM-006: a failing cache write does not break the online read', async () => {
-    vi.spyOn(offlineDb.accommodations, 'bulkPut').mockRejectedValue(new Error('quota exceeded'))
-    server.use(http.get('/api/trips/16/accommodations', () =>
-      HttpResponse.json({ accommodations: [buildAccommodation({ id: 84 })] })))
-
-    const result = await accommodationRepo.list(16)
-    expect(result.accommodations.map(a => a.id)).toEqual([84])
+  it('soft deletes and unlinks a Reservation', async () => {
+    const created = await accommodationRepo.create(-1, { place_id: -1, start_day_id: -1, end_day_id: -2 })
+    const stored = await offlineDb.accommodations.get(created.accommodation.id)
+    await offlineDb.reservations.put({ id: -1, sync_id: 'res-a', trip_id: -1, trip_sync_id: 'trip-a', accommodation_id: stored!.id, accommodation_sync_id: stored!.sync_id, title: 'Hotel', status: 'confirmed', type: 'hotel', created_at: 'x', updated_at: 'x', deleted_at: null } as never)
+    await accommodationRepo.delete(-1, stored!.id)
+    expect((await offlineDb.accommodations.get(stored!.id))!.deleted_at).toBeTruthy()
+    expect((await offlineDb.reservations.get(-1))!.accommodation_id).toBeNull()
   })
 })

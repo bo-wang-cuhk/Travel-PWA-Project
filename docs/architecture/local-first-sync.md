@@ -2,9 +2,9 @@
 
 ## 1. Current architecture
 
-TREK originally treats the server as the source of truth. Its existing Dexie database is an offline cache and its `mutationQueue` replays REST requests. In the standalone PWA, Trip, Day, Place and Assignment CRUD now use their repositories and IndexedDB, while later child modules remain server-backed.
+TREK originally treats the server as the source of truth. Its existing Dexie database is an offline cache and its `mutationQueue` replays REST requests. In the standalone PWA, Trip, Day, Place, Assignment, Accommodation and Reservation CRUD now use their repositories and IndexedDB, while later child modules remain server-backed.
 
-The migration proceeds by dependency boundary: Trip, then Day, then Place and Assignment. The legacy server cache sync remains intact for non-standalone TREK operation.
+The migration proceeds by dependency boundary: Trip, then Day, then Place and Assignment, then Accommodation and Reservation. The legacy server cache sync remains intact for non-standalone TREK operation.
 
 ## 2. Target architecture
 
@@ -31,7 +31,7 @@ No UI write waits for a provider request. Provider errors affect sync status onl
 Local write:
 
 ```text
-Trip/Day/Place/Assignment Repository transaction
+Trip/Day/Place/Assignment/Accommodation/Reservation Repository transaction
   ├── write the domain row
   ├── upsert syncOutbox
   └── mark entitySyncMeta pending
@@ -45,13 +45,15 @@ Repositories own local business CRUD, timestamps, UUID creation, tombstones and 
 
 ## 5. IndexedDB responsibility
 
-Dexie is the working database and persists business rows, provider-neutral sync metadata, conflicts, provider configuration and device-local credentials. Version 6 migrates Trip, version 7 migrates Day, and version 8 migrates Place and Assignment without clearing data.
+Dexie is the working database and persists business rows, provider-neutral sync metadata, conflicts, provider configuration and device-local credentials. Version 6 migrates Trip, version 7 migrates Day, version 8 migrates Place and Assignment, and version 9 migrates Accommodation and Reservation without clearing data.
 
 Numeric ids remain temporary local compatibility keys. `sync_id` is the canonical UUID exported to providers. Day and Place carry a Trip UUID; Assignment carries Trip, Day and Place UUIDs. Numeric ids are never exported.
 
 Version 7 adds Day UUIDs, parent UUIDs, timestamps and tombstones, then queues existing rows for their first provider sync. Orphaned legacy rows are marked with an `orphan:<numeric-id>` parent reference rather than silently deleted.
 
 Version 8 gives Place the same lifecycle metadata and extracts legacy Assignments embedded in cached Day rows into a dedicated table. Missing parent relations are marked as migration errors and are not uploaded. Category ids, ratings and participants remain local/server projections until those modules are migrated.
+
+Version 9 adds canonical UUIDs and relation UUIDs to Accommodation and Reservation, preserves numeric ids as local compatibility keys, and queues valid legacy rows for initial sync. Reservation day-position keys and day references nested in transport metadata are translated to Day UUIDs at the provider boundary. Traveler/account projections and external-service state are deliberately excluded from the portable payload.
 
 ## 6. SyncManager responsibility
 
@@ -75,6 +77,8 @@ trips/<trip-uuid>/trip.json
 trips/<trip-uuid>/days.json
 trips/<trip-uuid>/places.json
 trips/<trip-uuid>/assignments.json
+trips/<trip-uuid>/accommodations.json
+trips/<trip-uuid>/reservations.json
 ```
 
 The manifest contains schema version and per-entity path, parent UUIDs, timestamps, tombstone and opaque content version. It does not duplicate domain payloads. Child entities are grouped by Trip in their respective files, while conflict metadata remains per entity.
@@ -102,7 +106,7 @@ A static PWA cannot protect a stored token from malicious code executing in the 
 
 ## 13. Schema migration strategy
 
-All changes use Dexie version upgrades. Version 6 backfills Trip; version 7 adds Day identity and parent indexes; version 8 adds Place identity and the Assignment table. No reinstall, storage clear or destructive migration is required. Tombstones are retained until a future garbage-collection policy is implemented.
+All changes use Dexie version upgrades. Version 6 backfills Trip; version 7 adds Day identity and parent indexes; version 8 adds Place identity and the Assignment table; version 9 adds Accommodation and Reservation identities, relation indexes and outbox backfill. No reinstall, storage clear or destructive migration is required. Tombstones are retained until a future garbage-collection policy is implemented.
 
 ## 14. Future Supabase integration
 
@@ -110,8 +114,8 @@ All changes use Dexie version upgrades. Version 6 backfills Trip; version 7 adds
 
 ## Implemented boundary
 
-Trip, Day, Place and Assignment are migrated. Place CRUD/bulk operations and Assignment create/update/time/notes/transport/reorder/move/delete are local-first and sync through the provider-neutral outbox. Deleting a Day or Place also writes Assignment tombstones.
+Trip, Day, Place, Assignment, Accommodation and Reservation are migrated. Their normal CRUD and ordering operations are local-first and sync through the provider-neutral outbox. Hotel Reservation creation can atomically create its linked Accommodation. Deleting or shrinking a parent also tombstones or unlinks affected children so dangling relations are not synced.
 
-DayNote items, Expense, Reservation, Todo, Packing, files, collaboration, Auth and server removal are not implemented. Day title and whole-day notes are fields of Day and are migrated; the separate DayNote item collection is not. Place image upload and collaborative rating, plus Assignment participants, remain online-only enhancements.
+DayNote items, Expense/Budget, Todo, Packing, files, collaboration, Auth and server removal are not implemented. Day title and whole-day notes are fields of Day and are migrated; the separate DayNote item collection is not. Place image upload and collaborative rating, Assignment participants, Reservation travelers, booking parsing/import, automatic budget-entry creation, upcoming-booking aggregation and external AirTrail refresh remain online-only enhancements.
 
-The legacy TREK Server cache/WebSocket path remains for non-standalone use, but it is not part of the GitHub Pages core write path. “Clear offline data” retains Trip, Day, Place and Assignment working rows and only removes disposable, not-yet-migrated caches.
+The legacy TREK Server cache/WebSocket path remains for non-standalone use, but it is not part of the GitHub Pages core write path. “Clear offline data” retains all migrated working rows and only removes disposable, not-yet-migrated caches.

@@ -1,10 +1,12 @@
 import type { SyncedDay } from '../../../domain/daySyncModel'
 import type { SyncedPlace } from '../../../domain/placeSyncModel'
 import type { SyncedAssignment } from '../../../domain/assignmentSyncModel'
+import type { SyncedAccommodation } from '../../../domain/accommodationSyncModel'
+import type { SyncedReservation } from '../../../domain/reservationSyncModel'
 import type { SyncedTrip } from '../../../domain/tripSyncModel'
 import type { GitHubSyncPublicConfig, LocalChange, ProviderStatus, PushResult, RemoteChanges, SyncProvider } from '../../types'
 import { GitHubApi, GitHubApiError } from './githubApi'
-import { EMPTY_MANIFEST, type GitHubAssignmentsFile, type GitHubDaysFile, type GitHubManifest, type GitHubPlacesFile } from './githubTypes'
+import { EMPTY_MANIFEST, type GitHubAccommodationsFile, type GitHubAssignmentsFile, type GitHubDaysFile, type GitHubManifest, type GitHubPlacesFile, type GitHubReservationsFile } from './githubTypes'
 
 export class RemoteAdvancedError extends Error {
   constructor() {
@@ -131,8 +133,24 @@ export class GitHubSyncProvider implements SyncProvider {
         remoteVersion: entry.contentHash, payload,
       }
     }))
+    const accommodationFiles = new Map<string, Promise<GitHubAccommodationsFile>>()
+    const accommodationChanges = await Promise.all(Object.entries(manifest.accommodations ?? {}).filter(([, entry]) => !manifest.trips[entry.tripId]?.deletedAt).map(async ([entityId, entry]) => {
+      let promise = accommodationFiles.get(entry.path)
+      if (!promise) { promise = this.api.getFile<GitHubAccommodationsFile>(entry.path).then(result => result.value); accommodationFiles.set(entry.path, promise) }
+      const file = await promise, payload = file.accommodations.find(item => item.id === entityId)
+      if (file.schemaVersion !== 1 || file.tripId !== entry.tripId || !payload) throw new Error(`Invalid remote accommodation ${entityId}`)
+      return { entityType: 'accommodation' as const, entityId, operation: entry.deletedAt ? 'delete' as const : 'upsert' as const, remoteVersion: entry.contentHash, payload }
+    }))
+    const reservationFiles = new Map<string, Promise<GitHubReservationsFile>>()
+    const reservationChanges = await Promise.all(Object.entries(manifest.reservations ?? {}).filter(([, entry]) => !manifest.trips[entry.tripId]?.deletedAt).map(async ([entityId, entry]) => {
+      let promise = reservationFiles.get(entry.path)
+      if (!promise) { promise = this.api.getFile<GitHubReservationsFile>(entry.path).then(result => result.value); reservationFiles.set(entry.path, promise) }
+      const file = await promise, payload = file.reservations.find(item => item.id === entityId)
+      if (file.schemaVersion !== 1 || file.tripId !== entry.tripId || !payload) throw new Error(`Invalid remote reservation ${entityId}`)
+      return { entityType: 'reservation' as const, entityId, operation: entry.deletedAt ? 'delete' as const : 'upsert' as const, remoteVersion: entry.contentHash, payload }
+    }))
     // Dependency order is reinforced by SyncManager before applying.
-    return { cursor: head, changes: [...tripChanges, ...dayChanges, ...placeChanges, ...assignmentChanges] }
+    return { cursor: head, changes: [...tripChanges, ...dayChanges, ...placeChanges, ...assignmentChanges, ...accommodationChanges, ...reservationChanges] }
   }
 
   async push(changes: LocalChange[], cursor?: string | null): Promise<PushResult> {
@@ -149,7 +167,7 @@ export class GitHubSyncProvider implements SyncProvider {
     try { manifest = (await this.api.getFile<GitHubManifest>('manifest.json')).value }
     catch (error) {
       if (!(error instanceof GitHubApiError) || error.status !== 404) throw error
-      manifest = { ...EMPTY_MANIFEST, trips: {}, days: {}, places: {}, assignments: {} }
+      manifest = { ...EMPTY_MANIFEST, trips: {}, days: {}, places: {}, assignments: {}, accommodations: {}, reservations: {} }
     }
 
     const next: GitHubManifest = {
@@ -158,6 +176,8 @@ export class GitHubSyncProvider implements SyncProvider {
       days: { ...(manifest.days ?? {}) },
       places: { ...(manifest.places ?? {}) },
       assignments: { ...(manifest.assignments ?? {}) },
+      accommodations: { ...(manifest.accommodations ?? {}) },
+      reservations: { ...(manifest.reservations ?? {}) },
       updatedAt: new Date().toISOString(),
     }
     const treeEntries: Array<{ path: string; sha: string | null }> = []
@@ -291,6 +311,58 @@ export class GitHubSyncProvider implements SyncProvider {
         schemaVersion: 1, tripId, updatedAt: next.updatedAt,
         assignments: [...byId.values()].sort((a, b) => a.dayId.localeCompare(b.dayId) || a.orderIndex - b.orderIndex || a.id.localeCompare(b.id)),
       } satisfies GitHubAssignmentsFile)
+      treeEntries.push({ path, sha: blob.sha })
+    }
+
+    const accommodationGroups = new Map<string, LocalChange[]>()
+    for (const change of changes.filter(item => item.entityType === 'accommodation')) {
+      const value = change.payload as SyncedAccommodation | undefined
+      if (!value || value.schemaVersion !== 1 || value.id !== change.entityId || !value.tripId || !value.startDayId || !value.endDayId) throw new Error(`Invalid local accommodation ${change.entityId}`)
+      const group = accommodationGroups.get(value.tripId) ?? []; group.push(change); accommodationGroups.set(value.tripId, group)
+    }
+    for (const [tripId, group] of accommodationGroups) {
+      const path = `trips/${tripId}/accommodations.json`; let file: GitHubAccommodationsFile
+      try { file = (await this.api.getFile<GitHubAccommodationsFile>(path)).value } catch (error) {
+        if (!(error instanceof GitHubApiError) || error.status !== 404) throw error
+        file = { schemaVersion: 1, tripId, updatedAt: next.updatedAt, accommodations: [] }
+      }
+      if (file.schemaVersion !== 1 || file.tripId !== tripId || !Array.isArray(file.accommodations)) throw new Error(`Invalid remote accommodations file ${path}`)
+      const byId = new Map(file.accommodations.map(item => [item.id, item]))
+      for (const change of group) {
+        const value = change.payload as SyncedAccommodation; byId.set(value.id, value)
+        const version = `${value.updatedAt}:${value.deletedAt ?? 'active'}`
+        next.accommodations![value.id] = { path, tripId, placeId: value.placeId, startDayId: value.startDayId,
+          endDayId: value.endDayId, updatedAt: value.updatedAt, deletedAt: value.deletedAt, contentHash: version }
+        versions[value.id] = version
+      }
+      const blob = await this.api.createBlob({ schemaVersion: 1, tripId, updatedAt: next.updatedAt,
+        accommodations: [...byId.values()].sort((a, b) => a.startDayId.localeCompare(b.startDayId) || a.id.localeCompare(b.id)) } satisfies GitHubAccommodationsFile)
+      treeEntries.push({ path, sha: blob.sha })
+    }
+
+    const reservationGroups = new Map<string, LocalChange[]>()
+    for (const change of changes.filter(item => item.entityType === 'reservation')) {
+      const value = change.payload as SyncedReservation | undefined
+      if (!value || value.schemaVersion !== 1 || value.id !== change.entityId || !value.tripId) throw new Error(`Invalid local reservation ${change.entityId}`)
+      const group = reservationGroups.get(value.tripId) ?? []; group.push(change); reservationGroups.set(value.tripId, group)
+    }
+    for (const [tripId, group] of reservationGroups) {
+      const path = `trips/${tripId}/reservations.json`; let file: GitHubReservationsFile
+      try { file = (await this.api.getFile<GitHubReservationsFile>(path)).value } catch (error) {
+        if (!(error instanceof GitHubApiError) || error.status !== 404) throw error
+        file = { schemaVersion: 1, tripId, updatedAt: next.updatedAt, reservations: [] }
+      }
+      if (file.schemaVersion !== 1 || file.tripId !== tripId || !Array.isArray(file.reservations)) throw new Error(`Invalid remote reservations file ${path}`)
+      const byId = new Map(file.reservations.map(item => [item.id, item]))
+      for (const change of group) {
+        const value = change.payload as SyncedReservation; byId.set(value.id, value)
+        const version = `${value.updatedAt}:${value.deletedAt ?? 'active'}`
+        next.reservations![value.id] = { path, tripId, dayId: value.dayId, accommodationId: value.accommodationId,
+          updatedAt: value.updatedAt, deletedAt: value.deletedAt, contentHash: version }
+        versions[value.id] = version
+      }
+      const blob = await this.api.createBlob({ schemaVersion: 1, tripId, updatedAt: next.updatedAt,
+        reservations: [...byId.values()].sort((a, b) => (a.reservationTime ?? '').localeCompare(b.reservationTime ?? '') || a.id.localeCompare(b.id)) } satisfies GitHubReservationsFile)
       treeEntries.push({ path, sha: blob.sha })
     }
 

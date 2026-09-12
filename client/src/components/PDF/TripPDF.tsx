@@ -2,7 +2,8 @@
 import { createElement } from 'react'
 import { getCategoryIcon } from '../shared/categoryIcons'
 import { FileText, Info, Clock, MapPin, Navigation, Train, Plane, Bus, Car, Ship, Sailboat, Bike, CarTaxiFront, Route, Coffee, Ticket, Star, Heart, Camera, Flag, Lightbulb, AlertTriangle, ShoppingBag, Bookmark, Hotel, LogIn, LogOut, KeyRound, BedDouble, Utensils, Users, ParkingSquare, LucideIcon } from 'lucide-react'
-import { accommodationsApi, mapsApi, pluginsApi } from '../../api/client'
+import { mapsApi, pluginsApi } from '../../api/client'
+import { accommodationRepo } from '../../repo/accommodationRepo'
 import type { Trip, Day, Place, Category, AssignmentsMap, DayNote } from '../../types'
 import { isDayInAccommodationRange, getDayOrder } from '../../utils/dayOrder'
 import { hidesOnMiddleDay, getTransportForDay, getMergedItems, getSpanPhase, getDisplayTimeForDay } from '../../utils/dayMerge'
@@ -201,7 +202,7 @@ export async function downloadTripPDF({ trip, days, places, assignments = {}, ca
   const range = longDateRange(sorted, loc)
   const coverImg = safeImg(trip?.cover_image)
   //retrieve accommodations for the trip to display on the day sections and prefetch their photos if needed
-  const accommodations = await accommodationsApi.list(trip.id);
+  const accommodations = await accommodationRepo.list(trip.id);
 
   // Sections contributed by pdfSectionProvider plugins — server-normalized plain
   // text (counts + lengths capped), appended after the days. Fail-safe: an error

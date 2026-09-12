@@ -5,6 +5,8 @@ import { tripRepo } from '../repo/tripRepo'
 import { dayRepo } from '../repo/dayRepo'
 import { placeRepo } from '../repo/placeRepo'
 import { assignmentRepo } from '../repo/assignmentRepo'
+import { accommodationRepo } from '../repo/accommodationRepo'
+import { reservationRepo } from '../repo/reservationRepo'
 import type { LocalChange, ProviderStatus, PushResult, RemoteChanges, SyncEntityType, SyncProvider } from './types'
 import { SyncManager } from './SyncManager'
 
@@ -222,5 +224,24 @@ describe('local-first SyncManager', () => {
       localSnapshot: { notes: 'Local note' }, remoteSnapshot: { notes: 'Remote note' },
     })
     expect((await offlineDb.assignments.get(assignment.id))?.notes).toBe('Local note')
+  })
+
+  it('pushes and pulls Accommodation and Reservation with UUID relations', async () => {
+    const provider = new MemoryProvider()
+    const trip = await tripRepo.create({ title: 'Rome', day_count: 0 })
+    const day = await dayRepo.create(trip.trip.id)
+    const place = await placeRepo.create(trip.trip.id, { name: 'Hotel' })
+    const accommodation = await accommodationRepo.create(trip.trip.id, { place_id: place.place.id, start_day_id: day.day.id, end_day_id: day.day.id })
+    const reservation = await reservationRepo.create(trip.trip.id, { title: 'Hotel booking', type: 'hotel', day_id: day.day.id, accommodation_id: accommodation.accommodation.id })
+
+    await new SyncManager(provider).sync()
+    expect(provider.remote.get((await offlineDb.accommodations.get(accommodation.accommodation.id))!.sync_id!)?.payload).toMatchObject({ tripId: trip.trip.sync_id, placeId: place.place.sync_id, startDayId: day.day.sync_id })
+    const reservationSyncId = (await offlineDb.reservations.get(reservation.reservation.id))!.sync_id!
+    expect(provider.remote.get(reservationSyncId)?.payload).toMatchObject({ title: 'Hotel booking', accommodationId: (await offlineDb.accommodations.get(accommodation.accommodation.id))!.sync_id })
+
+    await clearAll(); await new SyncManager(provider).sync()
+    const pulledTrip = (await tripRepo.list()).trips[0]
+    expect((await accommodationRepo.list(pulledTrip.id)).accommodations[0]).toMatchObject({ place_name: 'Hotel' })
+    expect((await reservationRepo.list(pulledTrip.id)).reservations[0]).toMatchObject({ title: 'Hotel booking' })
   })
 })

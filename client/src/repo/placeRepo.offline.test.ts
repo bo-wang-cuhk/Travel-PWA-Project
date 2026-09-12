@@ -5,6 +5,8 @@ import { assignmentRepo } from './assignmentRepo'
 import { dayRepo } from './dayRepo'
 import { placeRepo } from './placeRepo'
 import { tripRepo } from './tripRepo'
+import { accommodationRepo } from './accommodationRepo'
+import { reservationRepo } from './reservationRepo'
 
 beforeEach(async () => { await clearAll() })
 afterEach(() => { vi.restoreAllMocks() })
@@ -60,6 +62,16 @@ describe('placeRepo local IndexedDB data source', () => {
     await placeRepo.delete(tripId, place.id)
     expect((await offlineDb.assignments.get(assignment.id))?.deleted_at).toBeTruthy()
     expect(await offlineDb.syncOutbox.get(`assignment:${(await offlineDb.assignments.get(assignment.id))?.sync_id}`)).toMatchObject({ operation: 'delete' })
+  })
+
+  it('FE-REPO-PLACE-005b: deleting a Place tombstones its stay and unlinks its Reservation', async () => {
+    const { tripId, dayId } = await seedTrip()
+    const { place } = await placeRepo.create(tripId, { name: 'Local hotel' })
+    const { accommodation } = await accommodationRepo.create(tripId, { place_id: place.id, start_day_id: dayId, end_day_id: dayId })
+    const { reservation } = await reservationRepo.create(tripId, { title: 'Hotel booking', place_id: place.id, accommodation_id: accommodation.id })
+    await placeRepo.delete(tripId, place.id)
+    expect((await offlineDb.accommodations.get(accommodation.id))?.deleted_at).toBeTruthy()
+    expect(await offlineDb.reservations.get(reservation.id)).toMatchObject({ place_id: null, accommodation_id: null, deleted_at: null })
   })
 
   it('FE-REPO-PLACE-006: bulk update and delete use the same local-first rules', async () => {

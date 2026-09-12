@@ -4,7 +4,8 @@ import { X, Sun, Cloud, CloudRain, CloudSnow, CloudDrizzle, CloudLightning, Wind
 
 const RES_TYPE_ICONS = { flight: Plane, hotel: Hotel, restaurant: Utensils, train: Train, car: Car, cruise: Ship, transit: TramFront, event: Ticket, tour: Users, parking: ParkingSquare, other: FileText }
 const RES_TYPE_COLORS = { flight: '#3b82f6', hotel: '#8b5cf6', restaurant: '#ef4444', train: '#06b6d4', car: '#6b7280', cruise: '#0ea5e9', transit: '#7c3aed', event: '#f59e0b', tour: '#10b981', parking: '#2563eb', other: '#6b7280' }
-import { weatherApi, accommodationsApi } from '../../api/client'
+import { weatherApi } from '../../api/client'
+import { accommodationRepo } from '../../repo/accommodationRepo'
 import { usePluginViewContributions, PluginCardFooter } from '../Plugins/PluginContributions'
 import { usePluginStore } from '../../store/pluginStore'
 import PluginFrame from '../Plugins/PluginFrame'
@@ -522,7 +523,7 @@ function HotelPickerModal({ showHotelPicker, setShowHotelPicker, font, t, hotelD
       return
     }
     try {
-      await accommodationsApi.update(tripId, accommodation.id, {
+      await accommodationRepo.update(tripId, accommodation.id, {
         place_id: hotelForm.place_id,
         start_day_id: hotelDayRange.start,
         end_day_id: hotelDayRange.end,
@@ -534,7 +535,7 @@ function HotelPickerModal({ showHotelPicker, setShowHotelPicker, font, t, hotelD
       setShowHotelPicker(false)
       setHotelForm({ check_in: '', check_in_end: '', check_out: '', confirmation: '', place_id: null })
       // Reload
-      const d = await accommodationsApi.list(tripId)
+      const d = await accommodationRepo.list(tripId)
       const all = d.accommodations || []
       setAccommodations(all)
       setDayAccommodations(all.filter(a =>

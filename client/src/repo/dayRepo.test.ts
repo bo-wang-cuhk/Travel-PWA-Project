@@ -4,6 +4,9 @@ import 'fake-indexeddb/auto'
 import { clearAll, offlineDb } from '../db/offlineDb'
 import { tripRepo } from './tripRepo'
 import { dayRepo } from './dayRepo'
+import { placeRepo } from './placeRepo'
+import { accommodationRepo } from './accommodationRepo'
+import { reservationRepo } from './reservationRepo'
 
 beforeEach(async () => { await clearAll() })
 afterEach(() => { vi.restoreAllMocks() })
@@ -77,6 +80,18 @@ describe('dayRepo local IndexedDB data source', () => {
     const tombstone = await offlineDb.days.get(a.day.id)
     expect(tombstone?.deleted_at).toBeTruthy()
     expect(await offlineDb.syncOutbox.get(`day:${a.day.sync_id}`)).toMatchObject({ operation: 'delete', status: 'pending' })
+  })
+
+  it('FE-REPO-DAY-006b: deleting a Day tombstones its stay and safely unlinks its Reservation', async () => {
+    const tripId = await trip()
+    const a = await dayRepo.create(tripId)
+    const b = await dayRepo.create(tripId)
+    const { place } = await placeRepo.create(tripId, { name: 'Local hotel' })
+    const { accommodation } = await accommodationRepo.create(tripId, { place_id: place.id, start_day_id: a.day.id, end_day_id: b.day.id })
+    const { reservation } = await reservationRepo.create(tripId, { title: 'Stay', day_id: a.day.id, accommodation_id: accommodation.id })
+    await dayRepo.delete(tripId, a.day.id)
+    expect((await offlineDb.accommodations.get(accommodation.id))?.deleted_at).toBeTruthy()
+    expect(await offlineDb.reservations.get(reservation.id)).toMatchObject({ day_id: null, accommodation_id: null, deleted_at: null })
   })
 
   it('FE-REPO-DAY-007: rejects a Day belonging to another Trip', async () => {

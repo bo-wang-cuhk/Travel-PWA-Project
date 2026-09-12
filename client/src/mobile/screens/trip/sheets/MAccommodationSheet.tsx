@@ -4,7 +4,7 @@ import MSheet from '../../../components/MSheet'
 import MIconBtn from '../../../components/MIconBtn'
 import CustomSelect from '../../../../components/shared/CustomSelect'
 import CustomTimePicker from '../../../../components/shared/CustomTimePicker'
-import { accommodationsApi } from '../../../../api/client'
+import { accommodationRepo } from '../../../../repo/accommodationRepo'
 import { useTranslation } from '../../../../i18n'
 import { Eyebrow } from './MTripSheetUi'
 import type { MTripSheetsProps } from '../MTripShell'
@@ -111,8 +111,8 @@ export default function MAccommodationSheet({ planner, shell }: MTripSheetsProps
     // Only the write itself decides whether the save failed — a refresh that
     // trips afterwards must not be reported as a failed save.
     try {
-      if (editing) await accommodationsApi.update(tripId, editing.id, body)
-      else await accommodationsApi.create(tripId, body)
+      if (editing) await accommodationRepo.update(tripId, editing.id, body)
+      else await accommodationRepo.create(tripId, body)
     } catch {
       planner.toast.error(t('common.error'))
       return

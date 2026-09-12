@@ -5,6 +5,17 @@ import { downloadTripPDF } from './TripPDF'
 import { server } from '../../../tests/helpers/msw/server'
 import { clearExchangeRateCache } from '../../hooks/useExchangeRates'
 import { getMergedItems, getTransportForDay } from '../../utils/dayMerge'
+import { accommodationRepo } from '../../repo/accommodationRepo'
+
+vi.mock('../../repo/accommodationRepo', () => ({
+  accommodationRepo: {
+    list: vi.fn(async (tripId: number) => {
+      const response = await fetch(`/api/trips/${tripId}/accommodations`)
+      if (!response.ok) throw new Error('Failed to load accommodations')
+      return response.json()
+    }),
+  },
+}))
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -223,11 +234,9 @@ describe('downloadTripPDF', () => {
     expect(iframe!.srcdoc).not.toContain('class="day-section')
   })
 
-  it('FE-COMP-TRIPPDF-010: calls accommodationsApi.list with the trip id', async () => {
-    const { accommodationsApi } = await import('../../api/client')
-    const spy = vi.spyOn(accommodationsApi, 'list')
+  it('FE-COMP-TRIPPDF-010: loads accommodations through the local repository', async () => {
     await downloadTripPDF(minimalArgs)
-    expect(spy).toHaveBeenCalledWith(1)
+    expect(accommodationRepo.list).toHaveBeenCalledWith(1)
   })
 
   it('FE-COMP-TRIPPDF-011: renders place cards with name, address and category badge', async () => {

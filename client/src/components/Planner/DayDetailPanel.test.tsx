@@ -13,6 +13,35 @@ import { resetAllStores, seedStore } from '../../../tests/helpers/store';
 import { buildUser, buildAdmin, buildTrip, buildDay, buildPlace, buildReservation } from '../../../tests/helpers/factories';
 import DayDetailPanel from './DayDetailPanel';
 
+vi.mock('../../repo/accommodationRepo', () => ({
+  accommodationRepo: {
+    list: vi.fn(async (tripId: number) => {
+      const response = await fetch(`/api/trips/${tripId}/accommodations`);
+      if (!response.ok) throw Object.assign(new Error('Failed to load accommodations'), { response: { data: await response.json() } });
+      return response.json();
+    }),
+    create: vi.fn(async (tripId: number, body: unknown) => {
+      const response = await fetch(`/api/trips/${tripId}/accommodations`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      if (!response.ok) throw Object.assign(new Error('Failed to create accommodation'), { response: { data: await response.json() } });
+      return response.json();
+    }),
+    update: vi.fn(async (tripId: number, id: number, body: unknown) => {
+      const response = await fetch(`/api/trips/${tripId}/accommodations/${id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      if (!response.ok) throw Object.assign(new Error('Failed to update accommodation'), { response: { data: await response.json() } });
+      return response.json();
+    }),
+    delete: vi.fn(async (tripId: number, id: number) => {
+      const response = await fetch(`/api/trips/${tripId}/accommodations/${id}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error('Failed to delete accommodation');
+      return response.json();
+    }),
+  },
+}));
+
 const day = buildDay({ id: 1, trip_id: 1, date: '2025-06-15', title: 'Day in Paris' });
 
 const defaultProps = {
@@ -39,7 +68,7 @@ beforeEach(() => {
   seedStore(useAuthStore, { user: buildAdmin(), isAuthenticated: true });
   seedStore(useTripStore, { trip: buildTrip({ id: 1 }) });
   seedStore(useSettingsStore, {
-    settings: { time_format: '24h', temperature_unit: 'celsius', blur_booking_codes: false },
+    settings: { time_format: '24h', temperature_unit: 'celsius', blur_booking_codes: false, language: 'en' },
   });
 });
 

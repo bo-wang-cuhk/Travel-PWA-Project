@@ -12,7 +12,7 @@ import { useBackgroundTasksStore } from '../../store/backgroundTasksStore'
 import { resetAllStores, seedStore } from '../../../tests/helpers/store'
 import { buildUser, buildTrip, buildDay, buildPlace, buildAssignment, buildReservation } from '../../../tests/helpers/factories'
 import {
-  addonsApi, accommodationsApi, authApi, tripsApi,
+  addonsApi, authApi, tripsApi,
   healthApi, airtrailApi, mapsApi,
 } from '../../api/client'
 import { accommodationRepo } from '../../repo/accommodationRepo'
@@ -199,7 +199,6 @@ beforeEach(() => {
   vi.spyOn(authApi, 'getAppConfig').mockResolvedValue({})
   vi.spyOn(healthApi, 'features').mockResolvedValue({ bookingImport: false, aiParsing: false })
   vi.spyOn(tripsApi, 'getMembers').mockResolvedValue({ owner: null, members: [] })
-  vi.spyOn(accommodationsApi, 'list').mockResolvedValue({ accommodations: [] })
   vi.mocked(assignmentRepo.updateTime).mockResolvedValue({ assignment: {} as never })
   vi.mocked(assignmentRepo.updateNotes).mockResolvedValue({ assignment: {} as never })
   vi.spyOn(airtrailApi, 'sync').mockResolvedValue({ changed: 0 })
@@ -1484,7 +1483,7 @@ describe('useTripPlanner — bookings and transports', () => {
 
   it('FE-TP-HOOK-077: a new hotel refreshes the accommodation list', async () => {
     seedTrip()
-    vi.mocked(accommodationsApi.list).mockResolvedValue({ accommodations: [{ id: 3 }] })
+    vi.mocked(accommodationRepo.list).mockResolvedValue({ accommodations: [{ id: 3 }] as never })
 
     const { result } = await renderPlanner()
     await act(async () => {
@@ -1740,7 +1739,7 @@ describe('useTripPlanner — bookings and transports', () => {
 
   it('FE-TP-HOOK-087: deleting a booking refreshes the accommodations', async () => {
     seedTrip()
-    vi.mocked(accommodationsApi.list).mockResolvedValue({ accommodations: [{ id: 1 }] })
+    vi.mocked(accommodationRepo.list).mockResolvedValue({ accommodations: [{ id: 1 }] as never })
 
     const { result } = await renderPlanner()
     await act(async () => { await result.current.handleDeleteReservation(5) })
@@ -1846,7 +1845,7 @@ describe('useTripPlanner — booking import review', () => {
 
   it('FE-TP-HOOK-090: advancing moves on to the transport item and then finishes the session', async () => {
     seedTrip()
-    vi.mocked(accommodationsApi.list).mockResolvedValue({ accommodations: [{ id: 2 }] })
+    vi.mocked(accommodationRepo.list).mockResolvedValue({ accommodations: [{ id: 2 }] as never })
 
     const { result } = await renderPlanner()
     act(() => { result.current.startImportReview([hotelItem, flightItem] as never) })
