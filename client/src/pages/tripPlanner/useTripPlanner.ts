@@ -8,10 +8,11 @@ import { useToast } from '../../components/shared/Toast'
 import { Map, Ticket, PackageCheck, Wallet, FolderOpen, Users, Train } from 'lucide-react'
 import { resolvePluginIcon } from '../../components/shared/PluginIcon'
 import { useTranslation, translateApiError } from '../../i18n'
-import { addonsApi, accommodationsApi, authApi, tripsApi, assignmentsApi, healthApi, airtrailApi, mapsApi } from '../../api/client'
+import { addonsApi, accommodationsApi, authApi, tripsApi, healthApi, airtrailApi, mapsApi } from '../../api/client'
 import { parsedItemToDraft, isTransportItem, isUnplaceableItem, type BookingReviewDraft } from '../../components/Planner/parsedItemToDraft'
 import type { BookingImportPreviewItem } from '@trek/shared'
 import { accommodationRepo } from '../../repo/accommodationRepo'
+import { assignmentRepo } from '../../repo/assignmentRepo'
 import { offlineDb, getImportFiles, deleteImportFiles } from '../../db/offlineDb'
 import { isEffectivelyOffline } from '../../sync/networkMode'
 import { useBackgroundTasksStore } from '../../store/backgroundTasksStore'
@@ -597,11 +598,11 @@ export function useTripPlanner() {
       await tripActions.updatePlace(tripId, editingPlace.id, placeData)
       // If editing from assignment context, save time per-assignment
       if (editingAssignmentId) {
-        await assignmentsApi.updateTime(tripId, editingAssignmentId, { place_time: place_time || null, end_time: end_time || null })
+        await assignmentRepo.updateTime(tripId, editingAssignmentId, { place_time: place_time || null, end_time: end_time || null })
         // The form only includes assignment_notes when the user changed it, so
         // an untouched note never produces a PUT (#2163). '' clears like null.
         if (assignment_notes !== undefined) {
-          await assignmentsApi.updateNotes(tripId, editingAssignmentId, { notes: assignment_notes || null })
+          await assignmentRepo.updateNotes(tripId, editingAssignmentId, assignment_notes || null)
         }
         await tripActions.refreshDays(tripId)
       }

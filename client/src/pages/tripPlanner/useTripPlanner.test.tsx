@@ -12,10 +12,11 @@ import { useBackgroundTasksStore } from '../../store/backgroundTasksStore'
 import { resetAllStores, seedStore } from '../../../tests/helpers/store'
 import { buildUser, buildTrip, buildDay, buildPlace, buildAssignment, buildReservation } from '../../../tests/helpers/factories'
 import {
-  addonsApi, accommodationsApi, authApi, tripsApi, assignmentsApi,
+  addonsApi, accommodationsApi, authApi, tripsApi,
   healthApi, airtrailApi, mapsApi,
 } from '../../api/client'
 import { accommodationRepo } from '../../repo/accommodationRepo'
+import { assignmentRepo } from '../../repo/assignmentRepo'
 import { offlineDb } from '../../db/offlineDb'
 import { getCached, fetchPhoto } from '../../services/photoService'
 import type { Place, Reservation, Settings } from '../../types'
@@ -75,6 +76,13 @@ vi.mock('../../sync/networkMode', async (importOriginal) => {
 
 vi.mock('../../repo/accommodationRepo', () => ({
   accommodationRepo: { list: vi.fn(async () => ({ accommodations: [] })) },
+}))
+
+vi.mock('../../repo/assignmentRepo', () => ({
+  assignmentRepo: {
+    updateTime: vi.fn(async () => ({ assignment: {} })),
+    updateNotes: vi.fn(async () => ({ assignment: {} })),
+  },
 }))
 
 vi.mock('../../services/photoService', () => ({
@@ -192,8 +200,8 @@ beforeEach(() => {
   vi.spyOn(healthApi, 'features').mockResolvedValue({ bookingImport: false, aiParsing: false })
   vi.spyOn(tripsApi, 'getMembers').mockResolvedValue({ owner: null, members: [] })
   vi.spyOn(accommodationsApi, 'list').mockResolvedValue({ accommodations: [] })
-  vi.spyOn(assignmentsApi, 'updateTime').mockResolvedValue({})
-  vi.spyOn(assignmentsApi, 'updateNotes').mockResolvedValue({})
+  vi.mocked(assignmentRepo.updateTime).mockResolvedValue({ assignment: {} as never })
+  vi.mocked(assignmentRepo.updateNotes).mockResolvedValue({ assignment: {} as never })
   vi.spyOn(airtrailApi, 'sync').mockResolvedValue({ changed: 0 })
   vi.spyOn(mapsApi, 'reverse').mockResolvedValue({ name: '', address: '' } as never)
   vi.spyOn(mapsApi, 'search').mockResolvedValue({ places: [] } as never)
@@ -1091,7 +1099,7 @@ describe('useTripPlanner — place CRUD', () => {
     })
 
     expect(actions.updatePlace).toHaveBeenCalledWith(42, 1, { name: 'Nara' })
-    expect(assignmentsApi.updateTime).toHaveBeenCalledWith(42, 10, { place_time: '09:00', end_time: '10:00' })
+    expect(assignmentRepo.updateTime).toHaveBeenCalledWith(42, 10, { place_time: '09:00', end_time: '10:00' })
     expect(actions.refreshDays).toHaveBeenCalledWith(42)
   })
 
@@ -1110,7 +1118,7 @@ describe('useTripPlanner — place CRUD', () => {
     })
 
     expect(actions.updatePlace).toHaveBeenCalledWith(42, 1, { name: 'Nara' })
-    expect(assignmentsApi.updateNotes).toHaveBeenCalledWith(42, 10, { notes: 'Book the 10:00 entry' })
+    expect(assignmentRepo.updateNotes).toHaveBeenCalledWith(42, 10, 'Book the 10:00 entry')
     expect(actions.refreshDays).toHaveBeenCalledWith(42)
   })
 
@@ -1128,13 +1136,13 @@ describe('useTripPlanner — place CRUD', () => {
     await act(async () => {
       await result.current.handleSavePlace({ name: 'Nara' })
     })
-    expect(assignmentsApi.updateNotes).not.toHaveBeenCalled()
+    expect(assignmentRepo.updateNotes).not.toHaveBeenCalled()
 
     // An empty string is an explicit clear and goes out as null.
     await act(async () => {
       await result.current.handleSavePlace({ name: 'Nara', assignment_notes: '' })
     })
-    expect(assignmentsApi.updateNotes).toHaveBeenCalledWith(42, 10, { notes: null })
+    expect(assignmentRepo.updateNotes).toHaveBeenCalledWith(42, 10, null)
   })
 
   it('FE-TP-HOOK-054: editing an unassigned place skips the per-assignment time write', async () => {
@@ -1148,7 +1156,7 @@ describe('useTripPlanner — place CRUD', () => {
       await result.current.handleSavePlace({ name: 'Nara', _pendingFiles: [new File(['x'], 'a.pdf')] })
     })
 
-    expect(assignmentsApi.updateTime).not.toHaveBeenCalled()
+    expect(assignmentRepo.updateTime).not.toHaveBeenCalled()
     expect(actions.addFile).toHaveBeenCalledTimes(1)
   })
 

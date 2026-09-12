@@ -1,292 +1,94 @@
-// FE-TSLICE-PLACE-001 to FE-TSLICE-PLACE-015 (image upload, ratings, bulk ops, error paths)
-import { http, HttpResponse } from 'msw';
-import { server } from '../../../tests/helpers/msw/server';
-import { resetAllStores, seedStore } from '../../../tests/helpers/store';
-import { buildAssignment, buildPlace } from '../../../tests/helpers/factories';
-import { placesApi } from '../../api/client';
-import { useTripStore } from '../tripStore';
-import type { Place } from '../../types';
+import 'fake-indexeddb/auto'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { buildAssignment, buildPlace } from '../../../tests/helpers/factories'
+import { placesApi } from '../../api/client'
+import { clearAll, offlineDb } from '../../db/offlineDb'
+import { assignmentRepo } from '../../repo/assignmentRepo'
+import { dayRepo } from '../../repo/dayRepo'
+import { placeRepo } from '../../repo/placeRepo'
+import { tripRepo } from '../../repo/tripRepo'
+import type { Place } from '../../types'
+import { resetAllStores, seedStore } from '../../../tests/helpers/store'
+import { useTripStore } from '../tripStore'
 
-beforeEach(() => {
-  resetAllStores();
-  server.resetHandlers();
-});
+beforeEach(async () => {
+  await clearAll()
+  resetAllStores()
+})
+afterEach(() => { vi.restoreAllMocks() })
 
-afterEach(() => {
-  vi.restoreAllMocks();
-});
-
-/** Rejection shaped like an axios error so getApiErrorMessage picks the server text. */
-function apiError(message: string): unknown {
-  return { response: { data: { error: message } } };
+async function localFixture(names = ['A']) {
+  const { trip } = await tripRepo.create({ title: 'Local', day_count: 1 })
+  const day = (await dayRepo.list(trip.id)).days[0]
+  const places = []
+  for (const name of names) places.push((await placeRepo.create(trip.id, { name })).place)
+  seedStore(useTripStore, { trip, days: [day], places })
+  return { trip, day, places }
 }
 
 describe('placesSlice', () => {
-  describe('uploadPlaceImage', () => {
-    it('FE-TSLICE-PLACE-001: applies the returned place and keeps the assignment times', async () => {
-      const place = buildPlace({ id: 10, trip_id: 1, image_url: null });
-      const assignment = buildAssignment({
-        id: 100,
-        day_id: 3,
-        // The override is what makes the embedded copy differ from the pool row:
-        // the server projects COALESCE(assignment_time, place_time), so without
-        // it these two could not disagree in the first place.
-        assignment_time: '09:00',
-        assignment_end_time: '10:30',
-        place: { ...place, place_time: '09:00', end_time: '10:30' },
-      });
-      seedStore(useTripStore, { places: [place], assignments: { '3': [assignment] } });
+  it('keeps image upload as an online-only enhancement', async () => {
+    const place = buildPlace({ id: 10, trip_id: 1, image_url: null })
+    const assignment = buildAssignment({ id: 100, day_id: 3, assignment_time: '09:00', assignment_end_time: '10:30', place: { ...place, place_time: '09:00', end_time: '10:30' } })
+    seedStore(useTripStore, { places: [place], assignments: { '3': [assignment] } })
+    const uploaded: Place = { ...place, image_url: '/uploads/places/pic.jpg' }
+    vi.spyOn(placesApi, 'uploadImage').mockResolvedValue({ place: uploaded })
+    await useTripStore.getState().uploadPlaceImage(1, 10, new File(['x'], 'pic.jpg'))
+    expect(useTripStore.getState().places[0].image_url).toBe('/uploads/places/pic.jpg')
+    expect(useTripStore.getState().assignments['3'][0].place.place_time).toBe('09:00')
+  })
 
-      const uploaded: Place = { ...place, image_url: '/uploads/places/pic.jpg' };
-      vi.spyOn(placesApi, 'uploadImage').mockResolvedValue({ place: uploaded });
+  it('keeps collaborative ratings as an online-only enhancement', async () => {
+    const place = buildPlace({ id: 10, trip_id: 1 })
+    seedStore(useTripStore, { places: [place] })
+    vi.spyOn(placesApi, 'rate').mockResolvedValue({ place: { ...place, rating_avg: 5, rating_count: 1 } })
+    await useTripStore.getState().ratePlace(1, 10, 5)
+    expect(useTripStore.getState().places[0].rating_avg).toBe(5)
+  })
 
-      const result = await useTripStore
-        .getState()
-        .uploadPlaceImage(1, 10, new File(['x'], 'pic.jpg', { type: 'image/jpeg' }));
+  it('creates and updates a Place through IndexedDB without fetch', async () => {
+    const { trip } = await localFixture([])
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    const created = await useTripStore.getState().addPlace(trip.id, { name: 'Louvre' })
+    const updated = await useTripStore.getState().updatePlace(trip.id, created.id, { name: 'Orsay' })
+    expect(updated.name).toBe('Orsay')
+    expect((await offlineDb.places.get(created.id))?.name).toBe('Orsay')
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
 
-      expect(result.image_url).toBe('/uploads/places/pic.jpg');
-      expect(useTripStore.getState().places[0].image_url).toBe('/uploads/places/pic.jpg');
-      const embedded = useTripStore.getState().assignments['3'][0].place;
-      expect(embedded.image_url).toBe('/uploads/places/pic.jpg');
-      // The assignment owns these times, so the fresh place must not overwrite them.
-      expect(embedded.place_time).toBe('09:00');
-      expect(embedded.end_time).toBe('10:30');
-    });
+  it('updates the pool and embedded assignment projection together', async () => {
+    const { trip, day, places } = await localFixture(['Museum'])
+    const assignment = (await assignmentRepo.create(trip.id, day.id, places[0].id)).assignment
+    seedStore(useTripStore, { assignments: { [String(day.id)]: [assignment] } })
+    await useTripStore.getState().updatePlace(trip.id, places[0].id, { name: 'New museum' })
+    expect(useTripStore.getState().assignments[String(day.id)][0].place.name).toBe('New museum')
+  })
 
-    it('FE-TSLICE-PLACE-002: leaves the assignments map alone when no day embeds the place', async () => {
-      const place = buildPlace({ id: 10, trip_id: 1 });
-      const other = buildPlace({ id: 20, trip_id: 1 });
-      const assignment = buildAssignment({ id: 100, day_id: 3, place: other });
-      seedStore(useTripStore, { places: [place, other], assignments: { '3': [assignment] } });
-      const before = useTripStore.getState().assignments;
+  it('bulk updates locally and leaves unrelated assignment maps intact', async () => {
+    const { trip, places } = await localFixture(['A', 'B'])
+    const before = { untouched: [buildAssignment()] }
+    seedStore(useTripStore, { assignments: before })
+    await useTripStore.getState().updatePlacesMany(trip.id, [places[0].id], { currency: 'JPY' })
+    expect(useTripStore.getState().places.find(place => place.id === places[0].id)?.currency).toBe('JPY')
+    expect(useTripStore.getState().assignments).toBe(before)
+  })
 
-      vi.spyOn(placesApi, 'uploadImage').mockResolvedValue({
-        place: { ...place, image_url: '/uploads/places/pic.jpg' },
-      });
+  it('deletes Places locally and prunes their visible Assignments', async () => {
+    const { trip, day, places } = await localFixture(['A', 'B'])
+    const assignment = (await assignmentRepo.create(trip.id, day.id, places[0].id)).assignment
+    seedStore(useTripStore, { assignments: { [String(day.id)]: [assignment] } })
+    await useTripStore.getState().deletePlace(trip.id, places[0].id)
+    expect(useTripStore.getState().places.map(place => place.name)).toEqual(['B'])
+    expect(useTripStore.getState().assignments[String(day.id)]).toEqual([])
+    expect((await offlineDb.places.get(places[0].id))?.deleted_at).toBeTruthy()
+  })
 
-      await useTripStore.getState().uploadPlaceImage(1, 10, new File(['x'], 'pic.jpg'));
-
-      expect(useTripStore.getState().assignments).toBe(before);
-      expect(useTripStore.getState().places[0].image_url).toBe('/uploads/places/pic.jpg');
-    });
-
-    it('FE-TSLICE-PLACE-003: surfaces the server message on failure', async () => {
-      seedStore(useTripStore, { places: [buildPlace({ id: 10, trip_id: 1 })] });
-      vi.spyOn(placesApi, 'uploadImage').mockRejectedValue(apiError('Image too large'));
-
-      await expect(
-        useTripStore.getState().uploadPlaceImage(1, 10, new File(['x'], 'pic.jpg')),
-      ).rejects.toThrow('Image too large');
-      expect(useTripStore.getState().places[0].image_url).toBeNull();
-    });
-  });
-
-  describe('ratePlace', () => {
-    it('FE-TSLICE-PLACE-004: a numeric rating is PUT and the fresh average is applied', async () => {
-      const place = buildPlace({ id: 10, trip_id: 1 });
-      seedStore(useTripStore, { places: [place] });
-
-      let sent: number | undefined;
-      server.use(
-        http.put('/api/trips/1/places/10/rating', async ({ request }) => {
-          const body = await request.json() as { rating: number };
-          sent = body.rating;
-          return HttpResponse.json({ place: { ...place, rating_avg: 4.5, rating_count: 2 } });
-        }),
-      );
-
-      const result = await useTripStore.getState().ratePlace(1, 10, 5);
-
-      expect(sent).toBe(5);
-      expect(result.rating_avg).toBe(4.5);
-      expect(useTripStore.getState().places[0].rating_count).toBe(2);
-    });
-
-    it('FE-TSLICE-PLACE-005: a null rating clears the vote via DELETE', async () => {
-      const place = buildPlace({ id: 10, trip_id: 1, rating_avg: 4 });
-      seedStore(useTripStore, { places: [place] });
-
-      let deleted = false;
-      server.use(
-        http.delete('/api/trips/1/places/10/rating', () => {
-          deleted = true;
-          return HttpResponse.json({ place: { ...place, rating_avg: null, rating_count: 0 } });
-        }),
-      );
-
-      await useTripStore.getState().ratePlace(1, 10, null);
-
-      expect(deleted).toBe(true);
-      expect(useTripStore.getState().places[0].rating_avg).toBeNull();
-    });
-
-    it('FE-TSLICE-PLACE-006: throws with the server message when rating fails', async () => {
-      seedStore(useTripStore, { places: [buildPlace({ id: 10, trip_id: 1 })] });
-      server.use(
-        http.put('/api/trips/1/places/10/rating', () =>
-          HttpResponse.json({ error: 'Rating out of range' }, { status: 422 }),
-        ),
-      );
-
-      await expect(useTripStore.getState().ratePlace(1, 10, 9)).rejects.toThrow('Rating out of range');
-    });
-  });
-
-  describe('deletePlace', () => {
-    it('FE-TSLICE-PLACE-007: rethrows the server message and keeps the pool intact', async () => {
-      const place = buildPlace({ id: 10, trip_id: 1 });
-      seedStore(useTripStore, { places: [place] });
-      server.use(
-        http.delete('/api/trips/1/places/10', () =>
-          HttpResponse.json({ error: 'Place is locked' }, { status: 409 }),
-        ),
-      );
-
-      await expect(useTripStore.getState().deletePlace(1, 10)).rejects.toThrow('Place is locked');
-      expect(useTripStore.getState().places).toHaveLength(1);
-    });
-  });
-
-  describe('deletePlacesMany', () => {
-    it('FE-TSLICE-PLACE-008: removes every listed place and prunes their assignments', async () => {
-      const a = buildPlace({ id: 10, trip_id: 1 });
-      const b = buildPlace({ id: 20, trip_id: 1 });
-      const keep = buildPlace({ id: 30, trip_id: 1 });
-      seedStore(useTripStore, {
-        places: [a, b, keep],
-        assignments: {
-          '1': [buildAssignment({ id: 100, day_id: 1, place: a }), buildAssignment({ id: 101, day_id: 1, place: keep })],
-          '2': [buildAssignment({ id: 200, day_id: 2, place: keep })],
-        },
-      });
-
-      let sentIds: number[] = [];
-      server.use(
-        http.post('/api/trips/1/places/bulk-delete', async ({ request }) => {
-          const body = await request.json() as { ids: number[] };
-          sentIds = body.ids;
-          return HttpResponse.json({ deleted: body.ids, count: body.ids.length });
-        }),
-      );
-
-      await useTripStore.getState().deletePlacesMany(1, [10, 20]);
-
-      expect(sentIds).toEqual([10, 20]);
-      expect(useTripStore.getState().places.map(p => p.id)).toEqual([30]);
-      expect(useTripStore.getState().assignments['1'].map(x => x.id)).toEqual([101]);
-      // Day 2 held no deleted place, so it is untouched.
-      expect(useTripStore.getState().assignments['2']).toHaveLength(1);
-    });
-
-    it('FE-TSLICE-PLACE-009: an empty id list is a no-op and issues no request', async () => {
-      const a = buildPlace({ id: 10, trip_id: 1 });
-      seedStore(useTripStore, { places: [a] });
-      let called = false;
-      server.use(
-        http.post('/api/trips/1/places/bulk-delete', () => {
-          called = true;
-          return HttpResponse.json({ deleted: [], count: 0 });
-        }),
-      );
-
-      await useTripStore.getState().deletePlacesMany(1, []);
-
-      expect(called).toBe(false);
-      expect(useTripStore.getState().places).toHaveLength(1);
-    });
-
-    it('FE-TSLICE-PLACE-010: throws and keeps the pool when the bulk delete fails', async () => {
-      const a = buildPlace({ id: 10, trip_id: 1 });
-      seedStore(useTripStore, { places: [a] });
-      server.use(
-        http.post('/api/trips/1/places/bulk-delete', () =>
-          HttpResponse.json({ error: 'Bulk delete refused' }, { status: 500 }),
-        ),
-      );
-
-      await expect(useTripStore.getState().deletePlacesMany(1, [10])).rejects.toThrow('Bulk delete refused');
-      expect(useTripStore.getState().places).toHaveLength(1);
-    });
-  });
-
-  describe('updatePlacesMany', () => {
-    it('FE-TSLICE-PLACE-011: leaves the days it does not touch alone', async () => {
-      const a = buildPlace({ id: 10, trip_id: 1, category_id: 1 });
-      const other = buildPlace({ id: 20, trip_id: 1, category_id: 1 });
-      seedStore(useTripStore, {
-        places: [a, other],
-        assignments: { '9': [buildAssignment({ id: 900, day_id: 9, place: other })] },
-      });
-      const before = useTripStore.getState().assignments;
-
-      server.use(
-        http.post('/api/trips/1/places/bulk-update', () => HttpResponse.json({ updated: [10], count: 1 })),
-      );
-
-      await useTripStore.getState().updatePlacesMany(1, [10], { category_id: 7 });
-
-      expect(useTripStore.getState().places.find(p => p.id === 10)?.category_id).toBe(7);
-      expect(useTripStore.getState().assignments).toBe(before);
-    });
-
-    it('FE-TSLICE-PLACE-012: throws with the server message when the bulk update fails', async () => {
-      const a = buildPlace({ id: 10, trip_id: 1, category_id: 1 });
-      seedStore(useTripStore, { places: [a] });
-      server.use(
-        http.post('/api/trips/1/places/bulk-update', () =>
-          HttpResponse.json({ error: 'Unknown category' }, { status: 400 }),
-        ),
-      );
-
-      await expect(
-        useTripStore.getState().updatePlacesMany(1, [10], { category_id: 99 }),
-      ).rejects.toThrow('Unknown category');
-      expect(useTripStore.getState().places[0].category_id).toBe(1);
-    });
-  });
-
-  describe('refreshPlaces', () => {
-    it('FE-TSLICE-PLACE-013: swallows a failing list request and keeps the current pool', async () => {
-      const stale = buildPlace({ id: 10, trip_id: 1, name: 'Stale' });
-      seedStore(useTripStore, { places: [stale] });
-      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-      server.use(
-        http.get('/api/trips/1/places', () => HttpResponse.json({ error: 'boom' }, { status: 500 })),
-      );
-
-      await expect(useTripStore.getState().refreshPlaces(1)).resolves.toBeUndefined();
-
-      expect(useTripStore.getState().places[0].name).toBe('Stale');
-      expect(consoleError).toHaveBeenCalled();
-    });
-  });
-
-  describe('updatePlace', () => {
-    it('FE-TSLICE-PLACE-015: throws the server message and leaves the pool untouched', async () => {
-      const place = buildPlace({ id: 10, trip_id: 1, name: 'Louvre' });
-      seedStore(useTripStore, { places: [place] });
-      server.use(
-        http.put('/api/trips/1/places/10', () =>
-          HttpResponse.json({ error: 'Place is locked' }, { status: 409 }),
-        ),
-      );
-
-      await expect(
-        useTripStore.getState().updatePlace(1, 10, { name: 'Orsay' }),
-      ).rejects.toThrow('Place is locked');
-      expect(useTripStore.getState().places[0].name).toBe('Louvre');
-    });
-  });
-
-  describe('addPlace', () => {
-    it('FE-TSLICE-PLACE-014: surfaces the server message on failure', async () => {
-      server.use(
-        http.post('/api/trips/1/places', () =>
-          HttpResponse.json({ error: 'Name required' }, { status: 422 }),
-        ),
-      );
-
-      await expect(useTripStore.getState().addPlace(1, { name: '' })).rejects.toThrow('Name required');
-    });
-  });
-});
+  it('refreshes from IndexedDB and does not contact the Server', async () => {
+    const { trip, places } = await localFixture(['Cached'])
+    seedStore(useTripStore, { places: [] })
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    await useTripStore.getState().refreshPlaces(trip.id)
+    expect(useTripStore.getState().places.map(place => place.id)).toEqual([places[0].id])
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})

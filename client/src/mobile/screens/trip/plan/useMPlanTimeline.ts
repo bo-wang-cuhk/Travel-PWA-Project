@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTripStore } from '../../../../store/tripStore'
 import { useRouteCalculation } from '../../../../hooks/useRouteCalculation'
-import { assignmentsApi, reservationsApi, weatherApi } from '../../../../api/client'
+import { reservationsApi, weatherApi } from '../../../../api/client'
+import { assignmentRepo } from '../../../../repo/assignmentRepo'
 import { usePluginStore } from '../../../../store/pluginStore'
 import { getDayBookendHotels } from '../../../../utils/dayOrder'
 import { getDisplayTimeForDay, getMergedItems, getTransportForDay, hasCarrierEndpointOnDay } from '../../../../utils/dayMerge'
@@ -370,7 +371,7 @@ export function useMPlanTimeline(planner: TripPlanner) {
     useTripStore.setState(state => ({
       assignments: { ...state.assignments, [key]: (state.assignments[key] || []).map(a => (a.id === assignmentId ? { ...a, leg_transport_mode: mode } : a)) },
     }))
-    assignmentsApi.updateTransport(tripId, assignmentId, mode).catch((err: unknown) => {
+    assignmentRepo.updateTransport(tripId, assignmentId, mode).catch((err: unknown) => {
       toast.error(err instanceof Error ? err.message : t('common.unknownError'))
       tripActions.refreshDays(tripId)
     })

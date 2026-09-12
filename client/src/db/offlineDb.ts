@@ -2,6 +2,8 @@ import Dexie, { type Table } from 'dexie';
 import type { Trip, Day, Place, PackingItem, TodoItem, BudgetItem, Reservation, TripFile, Accommodation, TripMember, Tag, Category } from '../types';
 import type { LocalTripRecord, StoredTripRecord } from '../domain/tripSyncModel';
 import type { LocalDayRecord, StoredDayRecord } from '../domain/daySyncModel';
+import type { LocalPlaceRecord, StoredPlaceRecord } from '../domain/placeSyncModel';
+import type { LocalAssignmentRecord, StoredAssignmentRecord } from '../domain/assignmentSyncModel';
 import type {
   EntitySyncMetaRecord,
   SyncConflictRecord,
@@ -144,7 +146,8 @@ function initialDbName(): string {
 class TrekOfflineDb extends Dexie {
   trips!: Table<StoredTripRecord, number>;
   days!: Table<StoredDayRecord, number>;
-  places!: Table<Place, number>;
+  places!: Table<StoredPlaceRecord, number>;
+  assignments!: Table<StoredAssignmentRecord, number>;
   packingItems!: Table<PackingItem, number>;
   todoItems!: Table<TodoItem, number>;
   budgetItems!: Table<BudgetItem, number>;
@@ -290,6 +293,83 @@ class TrekOfflineDb extends Dexie {
         lastError: day.trip_sync_id.startsWith('orphan:') ? 'Parent Trip was not found during migration' : null,
       })));
     });
+
+    // v8: Place becomes a local-first Trip child and Assignment becomes a
+    // first-class table instead of a projection embedded in cached Day rows.
+    this.version(8).stores({
+      places: 'id, &sync_id, trip_id, trip_sync_id, deleted_at, updated_at',
+      assignments: 'id, &sync_id, trip_id, trip_sync_id, day_id, day_sync_id, place_id, place_sync_id, [day_sync_id+order_index], deleted_at, updated_at',
+    }).upgrade(async tx => {
+      const now = new Date().toISOString();
+      const trips = await tx.table('trips').toArray() as LocalTripRecord[];
+      const days = await tx.table('days').toArray() as LocalDayRecord[];
+      const tripSyncIds = new Map(trips.map(trip => [trip.id, trip.sync_id]));
+      const dayById = new Map(days.map(day => [day.id, day]));
+
+      await tx.table('places').toCollection().modify((row: Partial<LocalPlaceRecord>) => {
+        if (!row.sync_id) row.sync_id = randomId();
+        if (!row.trip_sync_id) row.trip_sync_id = tripSyncIds.get(Number(row.trip_id)) || `orphan:${row.trip_id}`;
+        if (!row.created_at) row.created_at = now;
+        if (!row.updated_at) row.updated_at = row.created_at;
+        if (row.deleted_at === undefined) row.deleted_at = null;
+      });
+      const places = await tx.table('places').toArray() as LocalPlaceRecord[];
+      const placeById = new Map(places.map(place => [place.id, place]));
+
+      const embedded = new Map<number, LocalAssignmentRecord>();
+      for (const day of days) {
+        for (const assignment of day.assignments ?? []) {
+          if (embedded.has(assignment.id)) continue;
+          const place = placeById.get(assignment.place_id);
+          embedded.set(assignment.id, {
+            ...assignment,
+            trip_id: day.trip_id,
+            sync_id: randomId(),
+            trip_sync_id: day.trip_sync_id,
+            day_sync_id: day.sync_id,
+            place_sync_id: place?.sync_id || `orphan:${assignment.place_id}`,
+            created_at: assignment.created_at || now,
+            updated_at: assignment.created_at || now,
+            deleted_at: null,
+          });
+        }
+      }
+      if (embedded.size > 0) await tx.table('assignments').bulkPut([...embedded.values()]);
+      await tx.table('days').toCollection().modify((row: LocalDayRecord) => { delete row.assignments });
+
+      const assignments = await tx.table('assignments').toArray() as LocalAssignmentRecord[];
+      const placeSyncable = (place: LocalPlaceRecord) => !place.trip_sync_id.startsWith('orphan:');
+      const assignmentSyncable = (assignment: LocalAssignmentRecord) =>
+        !assignment.trip_sync_id.startsWith('orphan:') &&
+        !assignment.day_sync_id.startsWith('orphan:') &&
+        !assignment.place_sync_id.startsWith('orphan:') &&
+        dayById.has(assignment.day_id);
+
+      await tx.table('syncOutbox').bulkPut([
+        ...places.filter(placeSyncable).map(place => ({
+          key: `place:${place.sync_id}`, entityType: 'place', entityId: place.sync_id,
+          operation: place.deleted_at ? 'delete' : 'upsert', changedAt: Date.parse(place.updated_at) || Date.now(),
+          status: 'pending', attempts: 0, lastError: null,
+        })),
+        ...assignments.filter(assignmentSyncable).map(assignment => ({
+          key: `assignment:${assignment.sync_id}`, entityType: 'assignment', entityId: assignment.sync_id,
+          operation: assignment.deleted_at ? 'delete' : 'upsert', changedAt: Date.parse(assignment.updated_at) || Date.now(),
+          status: 'pending', attempts: 0, lastError: null,
+        })),
+      ]);
+      await tx.table('entitySyncMeta').bulkPut([
+        ...places.map(place => ({
+          key: `place:${place.sync_id}`, entityType: 'place', entityId: place.sync_id,
+          status: placeSyncable(place) ? 'pending' : 'error', remoteVersion: null, lastSyncedAt: null,
+          lastError: placeSyncable(place) ? null : 'Parent Trip was not found during migration',
+        })),
+        ...assignments.map(assignment => ({
+          key: `assignment:${assignment.sync_id}`, entityType: 'assignment', entityId: assignment.sync_id,
+          status: assignmentSyncable(assignment) ? 'pending' : 'error', remoteVersion: null, lastSyncedAt: null,
+          lastError: assignmentSyncable(assignment) ? null : 'Assignment relation was not found during migration',
+        })),
+      ]);
+    });
   }
 }
 
@@ -366,6 +446,7 @@ export async function upsertTrip(trip: Trip | LocalTripRecord): Promise<void> {
 
 export async function upsertDays(days: Day[]): Promise<void> {
   for (const day of days) {
+    const { assignments: _assignments, ...dayFields } = day;
     const incoming = day as Day & { created_at?: string; updated_at?: string };
     const [existing, trip] = await Promise.all([
       offlineDb.days.get(day.id),
@@ -374,7 +455,7 @@ export async function upsertDays(days: Day[]): Promise<void> {
     const now = new Date().toISOString();
     await offlineDb.days.put({
       ...existing,
-      ...day,
+      ...dayFields,
       sync_id: existing?.sync_id || randomId(),
       trip_sync_id: existing?.trip_sync_id || trip?.sync_id || `orphan:${day.trip_id}`,
       created_at: existing?.created_at || incoming.created_at || now,
@@ -384,8 +465,51 @@ export async function upsertDays(days: Day[]): Promise<void> {
   }
 }
 
+/** Preserve legacy Server bundle/WS compatibility while Assignment uses its own table. */
+export async function upsertAssignmentsFromDays(days: Day[]): Promise<void> {
+  for (const incomingDay of days) {
+    const day = await offlineDb.days.get(incomingDay.id);
+    if (!day?.sync_id || !day.trip_sync_id) continue;
+    for (const incoming of incomingDay.assignments ?? []) {
+      const { place: _placeProjection, ...fields } = incoming;
+      const [existing, place] = await Promise.all([
+        offlineDb.assignments.get(incoming.id),
+        offlineDb.places.get(incoming.place_id),
+      ]);
+      const now = new Date().toISOString();
+      await offlineDb.assignments.put({
+        ...existing,
+        ...fields,
+        trip_id: day.trip_id,
+        sync_id: existing?.sync_id || randomId(),
+        trip_sync_id: day.trip_sync_id,
+        day_sync_id: day.sync_id,
+        place_sync_id: place?.sync_id || existing?.place_sync_id || `orphan:${incoming.place_id}`,
+        created_at: existing?.created_at || incoming.created_at || now,
+        updated_at: now,
+        deleted_at: null,
+      });
+    }
+  }
+}
+
 export async function upsertPlaces(places: Place[]): Promise<void> {
-  await offlineDb.places.bulkPut(places);
+  for (const place of places) {
+    const [existing, trip] = await Promise.all([
+      offlineDb.places.get(place.id),
+      offlineDb.trips.get(place.trip_id),
+    ]);
+    const now = new Date().toISOString();
+    await offlineDb.places.put({
+      ...existing,
+      ...place,
+      sync_id: existing?.sync_id || randomId(),
+      trip_sync_id: existing?.trip_sync_id || trip?.sync_id || `orphan:${place.trip_id}`,
+      created_at: existing?.created_at || place.created_at || now,
+      updated_at: place.updated_at || existing?.updated_at || place.created_at || now,
+      deleted_at: existing?.deleted_at ?? null,
+    });
+  }
 }
 
 export async function upsertPackingItems(items: PackingItem[]): Promise<void> {
@@ -530,7 +654,6 @@ export async function clearTripData(tripId: number): Promise<void> {
   await offlineDb.transaction(
     'rw',
     [
-      offlineDb.places,
       offlineDb.packingItems,
       offlineDb.todoItems,
       offlineDb.budgetItems,
@@ -543,9 +666,8 @@ export async function clearTripData(tripId: number): Promise<void> {
       offlineDb.blobCache,
     ],
     async () => {
-      // Trip and Day are now working-database tables, not disposable download
+      // Trip, Day, Place and Assignment are working-database tables, not disposable download
       // caches. Clearing offline extras must never erase user-authored data.
-      await offlineDb.places.where('trip_id').equals(tripId).delete();
       await offlineDb.packingItems.where('trip_id').equals(tripId).delete();
       await offlineDb.todoItems.where('trip_id').equals(tripId).delete();
       await offlineDb.budgetItems.where('trip_id').equals(tripId).delete();

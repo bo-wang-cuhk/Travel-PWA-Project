@@ -4,6 +4,7 @@ import { offlineDb } from '../db/offlineDb'
 import { tripRepo } from '../repo/tripRepo'
 import { dayRepo } from '../repo/dayRepo'
 import { placeRepo } from '../repo/placeRepo'
+import { assignmentRepo } from '../repo/assignmentRepo'
 import { packingRepo } from '../repo/packingRepo'
 import { todoRepo } from '../repo/todoRepo'
 import { budgetRepo } from '../repo/budgetRepo'
@@ -129,10 +130,11 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     get().resetTrip()
     set({ isLoading: true, error: null })
     try {
-      const [tripData, daysData, placesData, packingData, todoData, budgetData, reservationsData, filesData, tagsData, categoriesData] = await Promise.all([
+      const [tripData, daysData, placesData, assignmentsData, packingData, todoData, budgetData, reservationsData, filesData, tagsData, categoriesData] = await Promise.all([
         tripRepo.get(tripId),
         dayRepo.list(tripId),
         placeRepo.list(tripId),
+        assignmentRepo.listByTrip(tripId),
         packingRepo.list(tripId),
         todoRepo.list(tripId),
         // Budget / reservations / files are hydrated here too so the offline
@@ -149,10 +151,9 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           : offlineDb.categories.toArray().then(categories => ({ categories })),
       ])
 
-      const assignmentsMap: AssignmentsMap = {}
       const dayNotesMap: DayNotesMap = {}
       for (const day of daysData.days) {
-        assignmentsMap[String(day.id)] = day.assignments || []
+        assignmentsData[String(day.id)] ||= []
         dayNotesMap[String(day.id)] = day.notes_items || []
       }
 
@@ -160,7 +161,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         trip: tripData.trip,
         days: daysData.days,
         places: placesData.places,
-        assignments: assignmentsMap,
+        assignments: assignmentsData,
         dayNotes: dayNotesMap,
         packingItems: packingData.items,
         todoItems: todoData.items,
@@ -186,6 +187,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     await Promise.all([
       get().refreshDays(tripId),
       placeRepo.list(tripId).then(d => set({ places: d.places })).catch(() => {}),
+      assignmentRepo.listByTrip(tripId).then(assignments => set({ assignments })).catch(() => {}),
       packingRepo.list(tripId).then(d => set({ packingItems: d.items })).catch(() => {}),
       todoRepo.list(tripId).then(d => set({ todoItems: d.items })).catch(() => {}),
       get().loadBudgetItems(tripId),
@@ -200,13 +202,13 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
   refreshDays: async (tripId: number | string) => {
     try {
       const daysData = await dayRepo.list(tripId)
-      const assignmentsMap: AssignmentsMap = {}
       const dayNotesMap: DayNotesMap = {}
       for (const day of daysData.days) {
-        assignmentsMap[String(day.id)] = day.assignments || []
         dayNotesMap[String(day.id)] = day.notes_items || []
       }
-      set({ days: daysData.days, assignments: assignmentsMap, dayNotes: dayNotesMap })
+      const assignments = await assignmentRepo.listByTrip(tripId)
+      for (const day of daysData.days) assignments[String(day.id)] ||= []
+      set({ days: daysData.days, assignments, dayNotes: dayNotesMap })
     } catch (err: unknown) {
       console.error('Failed to refresh days:', err)
     }

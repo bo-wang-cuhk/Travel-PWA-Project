@@ -1,4 +1,4 @@
-export type SyncEntityType = 'trip' | 'day'
+export type SyncEntityType = 'trip' | 'day' | 'place' | 'assignment'
 export type SyncOperation = 'upsert' | 'delete'
 export type EntitySyncStatus = 'synced' | 'pending' | 'syncing' | 'conflict' | 'error'
 

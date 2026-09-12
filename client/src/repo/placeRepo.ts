@@ -1,156 +1,124 @@
-import { placesApi } from '../api/client'
-import { offlineDb, upsertPlaces } from '../db/offlineDb'
-import { mutationQueue, generateUUID, nextTempId } from '../sync/mutationQueue'
-import { isEffectivelyOffline } from '../sync/networkMode'
-import { onlineThenCache } from './withOfflineFallback'
+import { offlineDb } from '../db/offlineDb'
+import type { LocalAssignmentRecord } from '../domain/assignmentSyncModel'
+import type { LocalPlaceRecord, StoredPlaceRecord } from '../domain/placeSyncModel'
+import { markLocalChange } from '../sync/localChangeRepository'
 import type { Place } from '../types'
+import { randomId } from '../utils/randomId'
+
+async function nextLocalPlaceId(): Promise<number> {
+  const first = await offlineDb.places.orderBy('id').first()
+  return first && first.id < 0 ? first.id - 1 : -1
+}
+
+function asLocalPlace(place: StoredPlaceRecord, tripSyncId: string): LocalPlaceRecord {
+  const now = new Date().toISOString()
+  return {
+    ...place,
+    sync_id: place.sync_id || randomId(),
+    trip_sync_id: place.trip_sync_id || tripSyncId,
+    created_at: place.created_at || now,
+    updated_at: place.updated_at || place.created_at || now,
+    deleted_at: place.deleted_at ?? null,
+  }
+}
+
+async function activePlaces(tripId: number): Promise<LocalPlaceRecord[]> {
+  const rows = await offlineDb.places.where('trip_id').equals(tripId).toArray()
+  return rows.filter(place => !place.deleted_at) as LocalPlaceRecord[]
+}
 
 export const placeRepo = {
-  async list(tripId: number | string, params?: Record<string, unknown>): Promise<{ places: Place[] }> {
-    return onlineThenCache(
+  async list(tripId: number | string, _params?: Record<string, unknown>): Promise<{ places: Place[] }> {
+    return { places: await activePlaces(Number(tripId)) }
+  },
+
+  async get(placeId: number | string): Promise<{ place: LocalPlaceRecord }> {
+    const place = await offlineDb.places.get(Number(placeId))
+    if (!place || place.deleted_at) throw new Error('Place not found in local database')
+    return { place: place as LocalPlaceRecord }
+  },
+
+  async create(tripId: number | string, data: Record<string, unknown> & { name: string }): Promise<{ place: LocalPlaceRecord }> {
+    const localTripId = Number(tripId)
+    return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.places, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
+      const trip = await offlineDb.trips.get(localTripId)
+      if (!trip || trip.deleted_at || !trip.sync_id) throw new Error('Trip not found in local database')
+      const now = new Date().toISOString()
+      const place: LocalPlaceRecord = {
+        ...(data as Partial<Place>),
+        id: await nextLocalPlaceId(),
+        sync_id: randomId(),
+        trip_id: localTripId,
+        trip_sync_id: trip.sync_id,
+        name: data.name,
+        created_at: now,
+        updated_at: now,
+        deleted_at: null,
+      }
+      await offlineDb.places.add(place)
+      await markLocalChange('place', place.sync_id, 'upsert')
+      return { place }
+    })
+  },
+
+  async update(tripId: number | string, id: number | string, data: Record<string, unknown>): Promise<{ place: LocalPlaceRecord }> {
+    const localTripId = Number(tripId)
+    return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.places, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
+      const [trip, stored] = await Promise.all([offlineDb.trips.get(localTripId), offlineDb.places.get(Number(id))])
+      if (!trip || trip.deleted_at || !trip.sync_id) throw new Error('Trip not found in local database')
+      if (!stored || stored.deleted_at || stored.trip_id !== localTripId) throw new Error('Place not found in local database')
+      const place = { ...asLocalPlace(stored, trip.sync_id), ...(data as Partial<Place>), updated_at: new Date().toISOString() }
+      await offlineDb.places.put(place)
+      await markLocalChange('place', place.sync_id, 'upsert')
+      return { place }
+    })
+  },
+
+  async delete(tripId: number | string, id: number | string): Promise<{ success: true }> {
+    const localTripId = Number(tripId)
+    await offlineDb.transaction(
+      'rw',
+      [offlineDb.trips, offlineDb.places, offlineDb.assignments, offlineDb.syncOutbox, offlineDb.entitySyncMeta],
       async () => {
-        const result = await placesApi.list(tripId, params)
-        upsertPlaces(result.places)
-        return result
+        const [trip, stored] = await Promise.all([offlineDb.trips.get(localTripId), offlineDb.places.get(Number(id))])
+        if (!trip || trip.deleted_at || !trip.sync_id) throw new Error('Trip not found in local database')
+        if (!stored || stored.deleted_at || stored.trip_id !== localTripId) throw new Error('Place not found in local database')
+        const now = new Date().toISOString()
+        const place = { ...asLocalPlace(stored, trip.sync_id), deleted_at: now, updated_at: now }
+        await offlineDb.places.put(place)
+        await markLocalChange('place', place.sync_id, 'delete')
+
+        const linked = await offlineDb.assignments.where('place_id').equals(place.id).toArray() as LocalAssignmentRecord[]
+        const affectedDays = new Set<number>()
+        for (const assignment of linked.filter(item => !item.deleted_at)) {
+          affectedDays.add(assignment.day_id)
+          const deleted = { ...assignment, deleted_at: now, updated_at: now }
+          await offlineDb.assignments.put(deleted)
+          await markLocalChange('assignment', deleted.sync_id, 'delete')
+        }
+        for (const dayId of affectedDays) {
+          const remaining = (await offlineDb.assignments.where('day_id').equals(dayId).toArray())
+            .filter(item => !item.deleted_at)
+            .sort((a, b) => a.order_index - b.order_index) as LocalAssignmentRecord[]
+          for (let index = 0; index < remaining.length; index++) {
+            if (remaining[index].order_index === index) continue
+            const changed = { ...remaining[index], order_index: index, updated_at: now }
+            await offlineDb.assignments.put(changed)
+            await markLocalChange('assignment', changed.sync_id, 'upsert')
+          }
+        }
       },
-      async () => ({
-        places: await offlineDb.places
-          .where('trip_id').equals(Number(tripId)).toArray(),
-      }),
     )
+    return { success: true }
   },
 
-  async create(tripId: number | string, data: Record<string, unknown> & { name: string }): Promise<{ place: Place }> {
-    if (isEffectivelyOffline()) {
-      const tempId = nextTempId()
-      const tempPlace: Place = {
-        ...(data as Partial<Place>),
-        id: tempId,
-        trip_id: Number(tripId),
-        name: (data.name as string) ?? 'New place',
-      } as Place
-      await offlineDb.places.put(tempPlace)
-      const id = generateUUID()
-      await mutationQueue.enqueue({
-        id,
-        tripId: Number(tripId),
-        method: 'POST',
-        url: `/trips/${tripId}/places`,
-        body: data,
-        resource: 'places',
-        tempId,
-      })
-      return { place: tempPlace }
-    }
-    const result = await placesApi.create(tripId, data)
-    offlineDb.places.put(result.place)
-    return result
-  },
-
-  async update(tripId: number | string, id: number | string, data: Record<string, unknown>): Promise<{ place: Place }> {
-    if (isEffectivelyOffline()) {
-      const existing = await offlineDb.places.get(Number(id))
-      // trip_id has to be there even when nothing was cached: every read goes
-      // through places.where('trip_id'), and clearTripData() evicts by it too —
-      // a row without it is invisible and never cleaned up.
-      const optimistic: Place = {
-        ...(existing ?? {} as Place),
-        ...(data as Partial<Place>),
-        id: Number(id),
-        trip_id: Number(tripId),
-      }
-      await offlineDb.places.put(optimistic)
-      const mutId = generateUUID()
-      const isTemp = Number(id) < 0
-      await mutationQueue.enqueue({
-        id: mutId,
-        tripId: Number(tripId),
-        method: 'PUT',
-        url: isTemp ? `/trips/${tripId}/places/{id}` : `/trips/${tripId}/places/${id}`,
-        body: data,
-        resource: 'places',
-        entityId: Number(id),
-        baseUpdatedAt: existing?.updated_at ?? null,
-        ...(isTemp ? { tempEntityId: Number(id) } : {}),
-      })
-      return { place: optimistic }
-    }
-    const result = await placesApi.update(tripId, id, data)
-    offlineDb.places.put(result.place)
-    return result
-  },
-
-  async delete(tripId: number | string, id: number | string): Promise<unknown> {
-    if (isEffectivelyOffline()) {
-      await offlineDb.places.delete(Number(id))
-      const mutId = generateUUID()
-      const isTemp = Number(id) < 0
-      await mutationQueue.enqueue({
-        id: mutId,
-        tripId: Number(tripId),
-        method: 'DELETE',
-        url: isTemp ? `/trips/${tripId}/places/{id}` : `/trips/${tripId}/places/${id}`,
-        body: undefined,
-        resource: 'places',
-        entityId: Number(id),
-        ...(isTemp ? { tempEntityId: Number(id) } : {}),
-      })
-      return { success: true }
-    }
-    const result = await placesApi.delete(tripId, id)
-    offlineDb.places.delete(Number(id))
-    return result
-  },
-
-  async deleteMany(tripId: number | string, ids: number[]): Promise<unknown> {
-    if (isEffectivelyOffline()) {
-      await offlineDb.places.bulkDelete(ids)
-      for (const id of ids) {
-        const mutId = generateUUID()
-        const isTemp = id < 0
-        await mutationQueue.enqueue({
-          id: mutId,
-          tripId: Number(tripId),
-          method: 'DELETE',
-          url: isTemp ? `/trips/${tripId}/places/{id}` : `/trips/${tripId}/places/${id}`,
-          body: undefined,
-          resource: 'places',
-          entityId: id,
-          ...(isTemp ? { tempEntityId: id } : {}),
-        })
-      }
-      return { deleted: ids, count: ids.length }
-    }
-    const result = await placesApi.bulkDelete(tripId, ids)
-    await offlineDb.places.bulkDelete(ids)
-    return result
+  async deleteMany(tripId: number | string, ids: number[]): Promise<{ deleted: number[]; count: number }> {
+    for (const id of ids) await this.delete(tripId, id)
+    return { deleted: ids, count: ids.length }
   },
 
   async updateMany(tripId: number | string, ids: number[], data: Record<string, unknown>): Promise<{ updated: number[]; count: number }> {
-    if (isEffectivelyOffline()) {
-      // Offline fans out one queued PUT per id (mirrors deleteMany's DELETE fan-out).
-      for (const id of ids) {
-        const existing = await offlineDb.places.get(id)
-        if (existing) await offlineDb.places.put({ ...existing, ...(data as Partial<Place>) })
-        const mutId = generateUUID()
-        const isTemp = id < 0
-        await mutationQueue.enqueue({
-          id: mutId,
-          tripId: Number(tripId),
-          method: 'PUT',
-          url: isTemp ? `/trips/${tripId}/places/{id}` : `/trips/${tripId}/places/${id}`,
-          body: data,
-          resource: 'places',
-          entityId: id,
-          baseUpdatedAt: existing?.updated_at ?? null,
-          ...(isTemp ? { tempEntityId: id } : {}),
-        })
-      }
-      return { updated: ids, count: ids.length }
-    }
-    const result = await placesApi.bulkUpdate(tripId, ids, data as Parameters<typeof placesApi.bulkUpdate>[2])
-    const cached = await offlineDb.places.bulkGet(ids)
-    await offlineDb.places.bulkPut(cached.filter(Boolean).map(p => ({ ...(p as Place), ...(data as Partial<Place>) })))
-    return result
+    for (const id of ids) await this.update(tripId, id, data)
+    return { updated: ids, count: ids.length }
   },
 }

@@ -7,8 +7,9 @@ import { avatarSrc } from '../../utils/avatarSrc'
 import { safeHttpUrl } from '../../utils/safeUrl'
 import { ChevronDown, ChevronRight, ChevronUp, Compass, Navigation, RotateCcw, ExternalLink, Clock, Pencil, GripVertical, Ticket, Plus, FileText, Trash2, Car, Lock, Hotel, Footprints, Route as RouteIcon, Bookmark, StickyNote, TramFront, Zap } from 'lucide-react'
 import { type PickedPlace } from './TransitSearchPanel'
-import { assignmentsApi, reservationsApi } from '../../api/client'
+import { reservationsApi } from '../../api/client'
 import { dayRepo } from '../../repo/dayRepo'
+import { assignmentRepo } from '../../repo/assignmentRepo'
 import { calculateRouteWithLegs, optimizeRoute, generateGoogleMapsUrl, generateCoMapsUrl, type NamedWaypoint } from '../Map/RouteCalculator'
 import GoogleMapsIcon from '../shared/GoogleMapsIcon'
 import PlaceAvatar from '../shared/PlaceAvatar'
@@ -902,7 +903,7 @@ function useDayPlanSidebar(props: DayPlanSidebarProps) {
 
     // Remove time from assignment
     try {
-      await assignmentsApi.updateTime(tripId, fromId, { place_time: null, end_time: null })
+      await assignmentRepo.updateTime(tripId, fromId, { place_time: null, end_time: null })
       const key = String(dayId)
       const currentAssignments = { ...assignments }
       if (currentAssignments[key]) {
@@ -1370,7 +1371,7 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
         [key]: assignments[key].map(a => (a.id === assignmentId ? { ...a, leg_transport_mode: mode } : a)),
       })
     }
-    assignmentsApi.updateTransport(tripId, assignmentId, mode).catch((err: unknown) => {
+    assignmentRepo.updateTransport(tripId, assignmentId, mode).catch((err: unknown) => {
       toast.error(err instanceof Error ? err.message : t('common.unknownError'))
       tripActions.refreshDays(tripId)
     })
@@ -1468,7 +1469,7 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
         [key]: assignments[key].map(a => (a.id === assignmentId ? { ...a, incoming_leg_transport_mode: mode } : a)),
       })
     }
-    assignmentsApi.updateTransport(tripId, assignmentId, mode, 'incoming').catch((err: unknown) => {
+    assignmentRepo.updateTransport(tripId, assignmentId, mode, 'incoming').catch((err: unknown) => {
       toast.error(err instanceof Error ? err.message : t('common.unknownError'))
       tripActions.refreshDays(tripId)
     })

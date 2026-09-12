@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { clearAll, offlineDb } from '../db/offlineDb'
 import { tripRepo } from '../repo/tripRepo'
 import { dayRepo } from '../repo/dayRepo'
-import type { LocalChange, ProviderStatus, PushResult, RemoteChanges, SyncProvider } from './types'
+import { placeRepo } from '../repo/placeRepo'
+import { assignmentRepo } from '../repo/assignmentRepo'
+import type { LocalChange, ProviderStatus, PushResult, RemoteChanges, SyncEntityType, SyncProvider } from './types'
 import { SyncManager } from './SyncManager'
 
 class MemoryProvider implements SyncProvider {
@@ -11,7 +13,7 @@ class MemoryProvider implements SyncProvider {
   connected = false
   fail = false
   cursor = 0
-  remote = new Map<string, { entityType: 'trip' | 'day'; version: string; deleted: boolean; payload?: unknown }>()
+  remote = new Map<string, { entityType: SyncEntityType; version: string; deleted: boolean; payload?: unknown }>()
 
   async connect(): Promise<ProviderStatus> {
     if (this.fail) throw new Error('provider unavailable')
@@ -45,7 +47,7 @@ class MemoryProvider implements SyncProvider {
     }
     return { cursor: `c${this.cursor}`, versions }
   }
-  editRemote(entityId: string, payload: unknown, entityType: 'trip' | 'day' = 'trip'): void {
+  editRemote(entityId: string, payload: unknown, entityType: SyncEntityType = 'trip'): void {
     const version = `v${++this.cursor}`
     this.remote.set(entityId, { entityType, version, deleted: false, payload })
   }
@@ -173,5 +175,52 @@ describe('local-first SyncManager', () => {
       remoteSnapshot: { title: 'Remote day' },
     })
     expect((await dayRepo.get(day.day.id)).day.title).toBe('Local day')
+  })
+
+  it('pushes and pulls Place and Assignment after their parent entities', async () => {
+    const provider = new MemoryProvider()
+    const { trip } = await tripRepo.create({ title: 'Nara', day_count: 1 })
+    const day = (await dayRepo.list(trip.id)).days[0]
+    const { place } = await placeRepo.create(trip.id, { name: 'Tōdai-ji', lat: 34.689 })
+    const { assignment } = await assignmentRepo.create(trip.id, day.id, place.id)
+    await assignmentRepo.updateTime(trip.id, assignment.id, { place_time: '09:30' })
+
+    await new SyncManager(provider).sync()
+    expect(provider.remote.get(place.sync_id)?.payload).toMatchObject({ id: place.sync_id, tripId: trip.sync_id, name: 'Tōdai-ji' })
+    expect(provider.remote.get((await offlineDb.assignments.get(assignment.id))!.sync_id!)?.payload).toMatchObject({
+      tripId: trip.sync_id,
+      dayId: (await offlineDb.days.get(day.id))!.sync_id,
+      placeId: place.sync_id,
+      assignmentTime: '09:30',
+    })
+
+    await clearAll()
+    await new SyncManager(provider).sync()
+    const pulledTrip = (await tripRepo.list()).trips[0]
+    const pulledDay = (await dayRepo.list(pulledTrip.id)).days[0]
+    const pulledPlace = (await placeRepo.list(pulledTrip.id)).places[0]
+    const pulledAssignments = await assignmentRepo.listByDay(pulledDay.id)
+    expect(pulledPlace).toMatchObject({ name: 'Tōdai-ji', sync_id: place.sync_id })
+    expect(pulledAssignments[0]).toMatchObject({ place_id: pulledPlace.id, assignment_time: '09:30' })
+  })
+
+  it('retains both versions when the same Assignment changes locally and remotely', async () => {
+    const provider = new MemoryProvider()
+    const { trip } = await tripRepo.create({ title: 'Tokyo', day_count: 1 })
+    const day = (await dayRepo.list(trip.id)).days[0]
+    const { place } = await placeRepo.create(trip.id, { name: 'Market' })
+    const { assignment } = await assignmentRepo.create(trip.id, day.id, place.id)
+    await new SyncManager(provider).sync()
+    const stored = await offlineDb.assignments.get(assignment.id)
+    await assignmentRepo.updateNotes(trip.id, assignment.id, 'Local note')
+    const remote = provider.remote.get(stored!.sync_id!)!.payload as Record<string, unknown>
+    provider.editRemote(stored!.sync_id!, { ...remote, notes: 'Remote note', updatedAt: new Date().toISOString() }, 'assignment')
+
+    const result = await new SyncManager(provider).sync()
+    expect(result.conflicts).toBe(1)
+    expect(await offlineDb.syncConflicts.get(`assignment:${stored!.sync_id}`)).toMatchObject({
+      localSnapshot: { notes: 'Local note' }, remoteSnapshot: { notes: 'Remote note' },
+    })
+    expect((await offlineDb.assignments.get(assignment.id))?.notes).toBe('Local note')
   })
 })

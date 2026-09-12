@@ -2,7 +2,7 @@ import type { StoreApi } from 'zustand'
 import type { TrekWsTripEventName } from '@trek/shared'
 import type { TripStoreState } from '../tripStore'
 import type { Assignment, Place, Day, DayNote, PackingItem, TodoItem, BudgetItem, BudgetItemMember, Reservation, Trip, TripFile, WebSocketEvent } from '../../types'
-import { offlineDb } from '../../db/offlineDb'
+import { offlineDb, upsertAssignmentsFromDays, upsertDays, upsertPlaces } from '../../db/offlineDb'
 import { useAuthStore } from '../authStore'
 import { mergeAssignmentPlace } from './placesSlice'
 
@@ -16,7 +16,7 @@ type DexieWriter = (payload: Record<string, unknown>, state: TripStoreState) => 
 // Shared writer bodies (one function referenced by every event that used to
 // share a switch fallthrough group).
 const putPlace: DexieWriter = async payload => {
-  await offlineDb.places.put(payload.place as Place)
+  await upsertPlaces([payload.place as Place])
 }
 const writeAssignmentDay: DexieWriter = async (payload, state) => {
   const assignment = payload.assignment as Assignment
@@ -90,8 +90,8 @@ export const DEXIE_WRITERS: Partial<Record<TrekWsTripEventName, DexieWriter>> = 
     await offlineDb.places.delete(payload.placeId as number)
   },
 
-  // ── Assignments (embedded in Day rows) ──────────────────────────────────
-  // Read the already-updated Day from the Zustand state and persist it.
+  // ── Assignments (first-class local rows) ─────────────────────────────────
+  // Rebuild the affected Day's rows from the already-updated Zustand state.
   'assignment:created': writeAssignmentDay,
   'assignment:updated': writeAssignmentDay,
   'assignment:deleted': writePayloadDay,
@@ -181,15 +181,29 @@ function writeToDexie(
   })()
 }
 
-/** Write a Day (with its current assignments + notes from Zustand) to Dexie. */
+/** Write a Day and reconcile its current Assignment rows from Zustand to Dexie. */
 async function _writeDayToDb(dayId: number, state: TripStoreState): Promise<void> {
   const day = state.days.find(d => d.id === dayId)
   if (!day) return
-  await offlineDb.days.put({
+  const assignments = state.assignments[String(dayId)] ?? []
+  const snapshot = {
     ...day,
-    assignments: state.assignments[String(dayId)] ?? [],
+    assignments,
     notes_items: state.dayNotes[String(dayId)] ?? [],
-  })
+  }
+  await upsertDays([snapshot])
+  await upsertAssignmentsFromDays([snapshot])
+
+  // A legacy Server delete/move event is represented by absence from the
+  // current Day snapshot. Keep a tombstone instead of leaving a stale row or
+  // physically deleting syncable data. A later write of the destination Day
+  // revives moved rows and updates their parent UUIDs.
+  const activeIds = new Set(assignments.map(assignment => assignment.id))
+  const staleRows = await offlineDb.assignments.where('day_id').equals(dayId).toArray()
+  const deletedAt = new Date().toISOString()
+  await offlineDb.assignments.bulkPut(staleRows
+    .filter(row => row.deleted_at == null && !activeIds.has(row.id))
+    .map(row => ({ ...row, deleted_at: deletedAt, updated_at: deletedAt })))
 }
 
 // ── Zustand event reducer ─────────────────────────────────────────────────────

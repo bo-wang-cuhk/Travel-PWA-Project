@@ -43,6 +43,7 @@ import {
   buildTripFile,
   buildTag,
   buildCategory,
+  buildAssignment,
 } from '../../tests/helpers/factories'
 
 function blobEntry(url: string, cachedAt: number, bytes: number, tripId = 1): BlobCacheEntry {
@@ -232,7 +233,7 @@ describe('offlineDb — blob cache budget', () => {
 })
 
 describe('offlineDb — clearTripData', () => {
-  it('FE-DB-OFFLINE-018: clears disposable caches but retains local-first Trip and Day rows', async () => {
+  it('FE-DB-OFFLINE-018: clears disposable caches but retains local-first Trip, Day and Place rows', async () => {
     await upsertTrip(buildTrip({ id: 1 }))
     await upsertTrip(buildTrip({ id: 2 }))
     await upsertDays([buildDay({ id: 1, trip_id: 1 }), buildDay({ id: 2, trip_id: 2 })])
@@ -252,7 +253,7 @@ describe('offlineDb — clearTripData', () => {
 
     expect(await offlineDb.trips.get(1)).toBeDefined()
     expect(await offlineDb.days.where('trip_id').equals(1).count()).toBe(1)
-    expect(await offlineDb.places.where('trip_id').equals(1).count()).toBe(0)
+    expect(await offlineDb.places.where('trip_id').equals(1).count()).toBe(1)
     expect(await offlineDb.packingItems.count()).toBe(0)
     expect(await offlineDb.todoItems.count()).toBe(0)
     expect(await offlineDb.budgetItems.count()).toBe(0)
@@ -421,6 +422,45 @@ describe('offlineDb — connection proxy', () => {
     expect(day?.deleted_at).toBeNull()
     expect(await offlineDb.syncOutbox.get(`day:${day!.sync_id}`)).toMatchObject({ entityType: 'day', operation: 'upsert', status: 'pending' })
     expect(await offlineDb.entitySyncMeta.get(`day:${day!.sync_id}`)).toMatchObject({ status: 'pending' })
+  })
+
+  it('FE-DB-OFFLINE-031: upgrading v7 extracts embedded Assignments and backfills Place relations', async () => {
+    const name = 'trek-offline-u58'
+    const legacy = new Dexie(name)
+    legacy.version(7).stores({
+      trips: 'id, &sync_id, deleted_at, updated_at',
+      days: 'id, &sync_id, trip_id, trip_sync_id, [trip_sync_id+day_number], deleted_at, updated_at',
+      places: 'id, trip_id', packingItems: 'id, trip_id', todoItems: 'id, trip_id', budgetItems: 'id, trip_id',
+      reservations: 'id, trip_id', tripFiles: 'id, trip_id', accommodations: 'id, trip_id',
+      tripMembers: '[tripId+id], tripId', tags: 'id', categories: 'id', mutationQueue: 'id, tripId, status, createdAt',
+      syncMeta: 'tripId', blobCache: 'url, cachedAt, tripId', importFiles: '[jobId+fileName], jobId, createdAt', appMeta: 'key',
+      syncOutbox: 'key, [entityType+entityId], status, changedAt', entitySyncMeta: 'key, [entityType+entityId], status',
+      syncState: 'providerId, status', syncConflicts: 'key, [entityType+entityId], detectedAt',
+      syncProviderConfig: 'providerId', syncCredentials: 'providerId',
+    })
+    const tripSyncId = '11111111-1111-4111-8111-111111111111'
+    const daySyncId = '22222222-2222-4222-8222-222222222222'
+    const place = buildPlace({ id: 721, trip_id: 720, name: 'Legacy place' })
+    await legacy.open()
+    await legacy.table('trips').put({ ...buildTrip({ id: 720 }), sync_id: tripSyncId, deleted_at: null })
+    await legacy.table('places').put(place)
+    await legacy.table('days').put({
+      ...buildDay({ id: 722, trip_id: 720, day_number: 1, assignments: [buildAssignment({ id: 723, day_id: 722, place })] }),
+      sync_id: daySyncId, trip_sync_id: tripSyncId, created_at: '2025-01-01T00:00:00.000Z',
+      updated_at: '2025-01-01T00:00:00.000Z', deleted_at: null,
+    })
+    legacy.close()
+
+    await reopenForUser(58)
+    const migratedPlace = await offlineDb.places.get(721)
+    const migratedAssignment = await offlineDb.assignments.get(723)
+    expect(migratedPlace).toMatchObject({ trip_sync_id: tripSyncId, deleted_at: null })
+    expect(migratedPlace?.sync_id).toMatch(/^[0-9a-f-]{36}$/i)
+    expect(migratedAssignment).toMatchObject({
+      trip_sync_id: tripSyncId, day_sync_id: daySyncId, place_sync_id: migratedPlace?.sync_id, deleted_at: null,
+    })
+    expect((await offlineDb.days.get(722))?.assignments).toBeUndefined()
+    expect(await offlineDb.syncOutbox.get(`assignment:${migratedAssignment!.sync_id}`)).toMatchObject({ status: 'pending' })
   })
 })
 

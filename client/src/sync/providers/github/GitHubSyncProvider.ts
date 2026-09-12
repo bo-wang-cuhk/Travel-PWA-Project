@@ -1,8 +1,10 @@
 import type { SyncedDay } from '../../../domain/daySyncModel'
+import type { SyncedPlace } from '../../../domain/placeSyncModel'
+import type { SyncedAssignment } from '../../../domain/assignmentSyncModel'
 import type { SyncedTrip } from '../../../domain/tripSyncModel'
 import type { GitHubSyncPublicConfig, LocalChange, ProviderStatus, PushResult, RemoteChanges, SyncProvider } from '../../types'
 import { GitHubApi, GitHubApiError } from './githubApi'
-import { EMPTY_MANIFEST, type GitHubDaysFile, type GitHubManifest } from './githubTypes'
+import { EMPTY_MANIFEST, type GitHubAssignmentsFile, type GitHubDaysFile, type GitHubManifest, type GitHubPlacesFile } from './githubTypes'
 
 export class RemoteAdvancedError extends Error {
   constructor() {
@@ -91,8 +93,46 @@ export class GitHubSyncProvider implements SyncProvider {
         payload,
       }
     }))
-    // Parent Trips must be applied before their Days on an empty device.
-    return { cursor: head, changes: [...tripChanges, ...dayChanges] }
+
+    const placeFiles = new Map<string, Promise<GitHubPlacesFile>>()
+    const visiblePlaceEntries = Object.entries(manifest.places ?? {}).filter(([, entry]) => !manifest.trips[entry.tripId]?.deletedAt)
+    const placeChanges = await Promise.all(visiblePlaceEntries.map(async ([entityId, entry]) => {
+      let filePromise = placeFiles.get(entry.path)
+      if (!filePromise) {
+        filePromise = this.api.getFile<GitHubPlacesFile>(entry.path).then(result => result.value)
+        placeFiles.set(entry.path, filePromise)
+      }
+      const file = await filePromise
+      if (file.schemaVersion !== 1 || file.tripId !== entry.tripId) throw new Error(`Invalid remote places file ${entry.path}`)
+      const payload = file.places.find(place => place.id === entityId)
+      if (!payload) throw new Error(`Remote place ${entityId} is missing from ${entry.path}`)
+      return {
+        entityType: 'place' as const, entityId,
+        operation: entry.deletedAt ? 'delete' as const : 'upsert' as const,
+        remoteVersion: entry.contentHash, payload,
+      }
+    }))
+
+    const assignmentFiles = new Map<string, Promise<GitHubAssignmentsFile>>()
+    const visibleAssignmentEntries = Object.entries(manifest.assignments ?? {}).filter(([, entry]) => !manifest.trips[entry.tripId]?.deletedAt)
+    const assignmentChanges = await Promise.all(visibleAssignmentEntries.map(async ([entityId, entry]) => {
+      let filePromise = assignmentFiles.get(entry.path)
+      if (!filePromise) {
+        filePromise = this.api.getFile<GitHubAssignmentsFile>(entry.path).then(result => result.value)
+        assignmentFiles.set(entry.path, filePromise)
+      }
+      const file = await filePromise
+      if (file.schemaVersion !== 1 || file.tripId !== entry.tripId) throw new Error(`Invalid remote assignments file ${entry.path}`)
+      const payload = file.assignments.find(assignment => assignment.id === entityId)
+      if (!payload) throw new Error(`Remote assignment ${entityId} is missing from ${entry.path}`)
+      return {
+        entityType: 'assignment' as const, entityId,
+        operation: entry.deletedAt ? 'delete' as const : 'upsert' as const,
+        remoteVersion: entry.contentHash, payload,
+      }
+    }))
+    // Dependency order is reinforced by SyncManager before applying.
+    return { cursor: head, changes: [...tripChanges, ...dayChanges, ...placeChanges, ...assignmentChanges] }
   }
 
   async push(changes: LocalChange[], cursor?: string | null): Promise<PushResult> {
@@ -109,13 +149,15 @@ export class GitHubSyncProvider implements SyncProvider {
     try { manifest = (await this.api.getFile<GitHubManifest>('manifest.json')).value }
     catch (error) {
       if (!(error instanceof GitHubApiError) || error.status !== 404) throw error
-      manifest = { ...EMPTY_MANIFEST, trips: {}, days: {} }
+      manifest = { ...EMPTY_MANIFEST, trips: {}, days: {}, places: {}, assignments: {} }
     }
 
     const next: GitHubManifest = {
       ...manifest,
       trips: { ...manifest.trips },
       days: { ...(manifest.days ?? {}) },
+      places: { ...(manifest.places ?? {}) },
+      assignments: { ...(manifest.assignments ?? {}) },
       updatedAt: new Date().toISOString(),
     }
     const treeEntries: Array<{ path: string; sha: string | null }> = []
@@ -180,6 +222,75 @@ export class GitHubSyncProvider implements SyncProvider {
         days: [...byId.values()].sort((a, b) => a.dayNumber - b.dayNumber || a.id.localeCompare(b.id)),
       }
       const blob = await this.api.createBlob(daysFile)
+      treeEntries.push({ path, sha: blob.sha })
+    }
+
+    const placeGroups = new Map<string, LocalChange[]>()
+    for (const change of changes.filter(item => item.entityType === 'place')) {
+      const place = change.payload as SyncedPlace | undefined
+      if (!place || place.schemaVersion !== 1 || place.id !== change.entityId || !place.tripId) throw new Error(`Invalid local place ${change.entityId}`)
+      const group = placeGroups.get(place.tripId) ?? []
+      group.push(change)
+      placeGroups.set(place.tripId, group)
+    }
+    for (const [tripId, group] of placeGroups) {
+      const path = `trips/${tripId}/places.json`
+      let file: GitHubPlacesFile
+      try { file = (await this.api.getFile<GitHubPlacesFile>(path)).value }
+      catch (error) {
+        if (!(error instanceof GitHubApiError) || error.status !== 404) throw error
+        file = { schemaVersion: 1, tripId, updatedAt: next.updatedAt, places: [] }
+      }
+      if (file.schemaVersion !== 1 || file.tripId !== tripId) throw new Error(`Invalid remote places file ${path}`)
+      const byId = new Map(file.places.map(place => [place.id, place]))
+      for (const change of group) {
+        const place = change.payload as SyncedPlace
+        byId.set(place.id, place)
+        const version = `${place.updatedAt}:${place.deletedAt ?? 'active'}`
+        next.places![place.id] = { path, tripId, updatedAt: place.updatedAt, deletedAt: place.deletedAt, contentHash: version }
+        versions[place.id] = version
+      }
+      const blob = await this.api.createBlob({
+        schemaVersion: 1, tripId, updatedAt: next.updatedAt,
+        places: [...byId.values()].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)),
+      } satisfies GitHubPlacesFile)
+      treeEntries.push({ path, sha: blob.sha })
+    }
+
+    const assignmentGroups = new Map<string, LocalChange[]>()
+    for (const change of changes.filter(item => item.entityType === 'assignment')) {
+      const assignment = change.payload as SyncedAssignment | undefined
+      if (!assignment || assignment.schemaVersion !== 1 || assignment.id !== change.entityId || !assignment.tripId || !assignment.dayId || !assignment.placeId) {
+        throw new Error(`Invalid local assignment ${change.entityId}`)
+      }
+      const group = assignmentGroups.get(assignment.tripId) ?? []
+      group.push(change)
+      assignmentGroups.set(assignment.tripId, group)
+    }
+    for (const [tripId, group] of assignmentGroups) {
+      const path = `trips/${tripId}/assignments.json`
+      let file: GitHubAssignmentsFile
+      try { file = (await this.api.getFile<GitHubAssignmentsFile>(path)).value }
+      catch (error) {
+        if (!(error instanceof GitHubApiError) || error.status !== 404) throw error
+        file = { schemaVersion: 1, tripId, updatedAt: next.updatedAt, assignments: [] }
+      }
+      if (file.schemaVersion !== 1 || file.tripId !== tripId) throw new Error(`Invalid remote assignments file ${path}`)
+      const byId = new Map(file.assignments.map(assignment => [assignment.id, assignment]))
+      for (const change of group) {
+        const assignment = change.payload as SyncedAssignment
+        byId.set(assignment.id, assignment)
+        const version = `${assignment.updatedAt}:${assignment.deletedAt ?? 'active'}`
+        next.assignments![assignment.id] = {
+          path, tripId, dayId: assignment.dayId, placeId: assignment.placeId,
+          updatedAt: assignment.updatedAt, deletedAt: assignment.deletedAt, contentHash: version,
+        }
+        versions[assignment.id] = version
+      }
+      const blob = await this.api.createBlob({
+        schemaVersion: 1, tripId, updatedAt: next.updatedAt,
+        assignments: [...byId.values()].sort((a, b) => a.dayId.localeCompare(b.dayId) || a.orderIndex - b.orderIndex || a.id.localeCompare(b.id)),
+      } satisfies GitHubAssignmentsFile)
       treeEntries.push({ path, sha: blob.sha })
     }
 

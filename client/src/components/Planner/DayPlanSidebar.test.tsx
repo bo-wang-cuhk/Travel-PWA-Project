@@ -59,6 +59,13 @@ vi.mock('../../repo/dayRepo', () => ({
   dayRepo: { updateTransport: vi.fn().mockResolvedValue({ day: {} }) },
 }))
 
+vi.mock('../../repo/assignmentRepo', () => ({
+  assignmentRepo: {
+    updateTime: vi.fn().mockResolvedValue({ assignment: {} }),
+    updateTransport: vi.fn().mockResolvedValue({ assignment: {} }),
+  },
+}))
+
 vi.mock('../PDF/TripPDF', () => ({ downloadTripPDF: vi.fn().mockResolvedValue(undefined) }))
 
 vi.mock('../Map/RouteCalculator', () => ({
@@ -1777,7 +1784,7 @@ describe('DayPlanSidebar', () => {
 
   it('FE-PLANNER-DAYPLAN-081: clicking Confirm in time modal calls confirmTimeRemoval (updates assignment time)', async () => {
     const user = userEvent.setup()
-    const { assignmentsApi } = await import('../../api/client')
+    const { assignmentRepo } = await import('../../repo/assignmentRepo')
     const placeA = buildPlace({ id: 1, name: 'Morning Place', place_time: '08:00' })
     const placeB = buildPlace({ id: 2, name: 'Afternoon Place', place_time: '14:00' })
     const day = buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' })
@@ -1803,13 +1810,12 @@ describe('DayPlanSidebar', () => {
     const confirmBtn = screen.getByRole('button', { name: /confirm/i })
     await user.click(confirmBtn)
 
-    await waitFor(() => expect((assignmentsApi as any).updateTime).toHaveBeenCalled())
+    await waitFor(() => expect((assignmentRepo as any).updateTime).toHaveBeenCalled())
   })
 
   // ── applyMergedOrder with notes in list (noteUpdates branch) ──────────────
 
   it('FE-PLANNER-DAYPLAN-082: reordering day with notes populates noteUpdates in applyMergedOrder', async () => {
-    const { assignmentsApi } = await import('../../api/client')
     const onReorder = vi.fn().mockResolvedValue(undefined)
     const placeA = buildPlace({ id: 1, name: 'Place Alpha' })
     const placeB = buildPlace({ id: 2, name: 'Place Beta' })
@@ -2057,7 +2063,7 @@ describe('DayPlanSidebar', () => {
 
   it('FE-PLANNER-DAYPLAN-093: arrow-reorder timed place shows modal then confirm removes time', async () => {
     const user = userEvent.setup()
-    const { assignmentsApi } = await import('../../api/client') as any
+    const { assignmentRepo } = await import('../../repo/assignmentRepo') as any
     const onReorder = vi.fn().mockResolvedValue(undefined)
     const placeA = buildPlace({ id: 1, name: 'Early Place', place_time: '08:00' })
     const placeB = buildPlace({ id: 2, name: 'Later Place', place_time: '14:00' })
@@ -2080,7 +2086,7 @@ describe('DayPlanSidebar', () => {
       // Click Confirm
       const confirmBtn = screen.getByRole('button', { name: /confirm/i })
       await user.click(confirmBtn)
-      await waitFor(() => expect(assignmentsApi.updateTime).toHaveBeenCalled())
+      await waitFor(() => expect(assignmentRepo.updateTime).toHaveBeenCalled())
     }
   })
 
@@ -2902,8 +2908,8 @@ describe('DayPlanSidebar', () => {
 
   it('FE-PLANNER-DAYPLAN-127: a failing time removal aborts the reorder and reports the error', async () => {
     const user = userEvent.setup()
-    const { assignmentsApi } = await import('../../api/client')
-    vi.mocked(assignmentsApi.updateTime).mockRejectedValueOnce(new Error('locked'))
+    const { assignmentRepo } = await import('../../repo/assignmentRepo')
+    vi.mocked(assignmentRepo.updateTime).mockRejectedValueOnce(new Error('locked'))
     const placeA = buildPlace({ id: 1, name: 'Morning Place', place_time: '08:00' })
     const placeB = buildPlace({ id: 2, name: 'Afternoon Place', place_time: '14:00' })
     const day = buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' })
@@ -3790,7 +3796,7 @@ describe('DayPlanSidebar', () => {
 
   it('FE-PLANNER-DAYPLAN-171: a route connector opens the per-segment travel-mode menu', async () => {
     const user = userEvent.setup()
-    const { assignmentsApi } = await import('../../api/client')
+    const { assignmentRepo } = await import('../../repo/assignmentRepo')
     const setAssignments = vi.fn()
     stubTripActions({ setAssignments })
     const day = buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' })
@@ -3804,14 +3810,14 @@ describe('DayPlanSidebar', () => {
     const connector = await screen.findByTitle('Change travel mode')
     await user.click(connector)
     await user.click(contextMenu().getByRole('button', { name: 'Walking' }))
-    expect(vi.mocked(assignmentsApi.updateTransport)).toHaveBeenCalledWith(1, 11, 'walking')
+    expect(vi.mocked(assignmentRepo.updateTransport)).toHaveBeenCalledWith(1, 11, 'walking')
     expect(setAssignments).toHaveBeenCalledWith({
       '10': [expect.objectContaining({ id: 11, leg_transport_mode: 'walking' }), expect.objectContaining({ id: 12 })],
     })
 
     await user.click(await screen.findByTitle('Change travel mode'))
     await user.click(contextMenu().getByRole('button', { name: 'Use day default' }))
-    expect(vi.mocked(assignmentsApi.updateTransport)).toHaveBeenLastCalledWith(1, 11, null)
+    expect(vi.mocked(assignmentRepo.updateTransport)).toHaveBeenLastCalledWith(1, 11, null)
   })
 
   it('FE-PLANNER-DAYPLAN-171b: a stop-to-stop connector offers public transport pre-filled from the leg', async () => {
@@ -3910,8 +3916,8 @@ describe('DayPlanSidebar', () => {
 
   it('FE-PLANNER-DAYPLAN-172: a failing per-segment save is reported and the days are refetched', async () => {
     const user = userEvent.setup()
-    const { assignmentsApi } = await import('../../api/client')
-    vi.mocked(assignmentsApi.updateTransport).mockRejectedValueOnce(new Error('nope'))
+    const { assignmentRepo } = await import('../../repo/assignmentRepo')
+    vi.mocked(assignmentRepo.updateTransport).mockRejectedValueOnce(new Error('nope'))
     const refreshDays = vi.fn(async () => undefined)
     stubTripActions({ refreshDays })
     const day = buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' })
@@ -4047,7 +4053,7 @@ describe('DayPlanSidebar', () => {
 
   it('FE-PLANNER-DAYPLAN-180: the chronology check spans notes and bookings, not just stops', async () => {
     const user = userEvent.setup()
-    const { assignmentsApi } = await import('../../api/client')
+    const { assignmentRepo } = await import('../../repo/assignmentRepo')
     const day = buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' })
     const placeA = buildPlace({ id: 1, name: 'Morning Place', place_time: '08:00' })
     const placeB = buildPlace({ id: 2, name: 'Afternoon Place', place_time: '14:00' })
@@ -4067,7 +4073,7 @@ describe('DayPlanSidebar', () => {
     fireEvent.drop(dragRow(screen.getByText('Morning Place')), { dataTransfer: { getData: vi.fn(() => '') } })
     await waitFor(() => expect(screen.getByText('Remove time?')).toBeInTheDocument())
     await user.click(screen.getByRole('button', { name: /confirm/i }))
-    await waitFor(() => expect(vi.mocked(assignmentsApi.updateTime)).toHaveBeenCalledWith(1, 12, { place_time: null, end_time: null }))
+    await waitFor(() => expect(vi.mocked(assignmentRepo.updateTime)).toHaveBeenCalledWith(1, 12, { place_time: null, end_time: null }))
     await waitFor(() => expect(onReorder).toHaveBeenCalledWith(10, [12, 11]))
     // The booking keeps its slot in the rebuilt order.
     expect(screen.getByText('Midday bus')).toBeInTheDocument()
@@ -4075,7 +4081,8 @@ describe('DayPlanSidebar', () => {
 
   it('FE-PLANNER-DAYPLAN-181: an arrow reorder across a booking drops the time and re-slots the booking', async () => {
     const user = userEvent.setup()
-    const { assignmentsApi, reservationsApi } = await import('../../api/client')
+    const { assignmentRepo } = await import('../../repo/assignmentRepo')
+    const { reservationsApi } = await import('../../api/client')
     const day = buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' })
     const placeA = buildPlace({ id: 1, name: 'Morning Place', place_time: '08:00' })
     const placeB = buildPlace({ id: 2, name: 'Evening Place', place_time: '18:00' })
@@ -4095,7 +4102,7 @@ describe('DayPlanSidebar', () => {
     await user.click(upBtn)
     await waitFor(() => expect(screen.getByText('Remove time?')).toBeInTheDocument())
     await user.click(screen.getByRole('button', { name: /confirm/i }))
-    await waitFor(() => expect(vi.mocked(assignmentsApi.updateTime)).toHaveBeenCalledWith(1, 12, { place_time: null, end_time: null }))
+    await waitFor(() => expect(vi.mocked(assignmentRepo.updateTime)).toHaveBeenCalledWith(1, 12, { place_time: null, end_time: null }))
     await waitFor(() => expect(onReorder).toHaveBeenCalledWith(10, [11, 12]))
     // The stop really moves past the booking: the bus lands behind both places
     // instead of keeping its old slot between them.

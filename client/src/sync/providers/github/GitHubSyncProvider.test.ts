@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SyncedTrip } from '../../../domain/tripSyncModel'
 import type { SyncedDay } from '../../../domain/daySyncModel'
+import type { SyncedPlace } from '../../../domain/placeSyncModel'
+import type { SyncedAssignment } from '../../../domain/assignmentSyncModel'
 import { EMPTY_MANIFEST, type GitHubManifest } from './githubTypes'
 import { GitHubSyncProvider, RemoteAdvancedError } from './GitHubSyncProvider'
 
@@ -32,6 +34,21 @@ const day: SyncedDay = {
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-02T00:00:00.000Z',
   deletedAt: null,
+}
+const place: SyncedPlace = {
+  schemaVersion: 1, id: '33333333-3333-4333-8333-333333333333', tripId: trip.id,
+  name: 'Senso-ji', description: null, lat: 35.7148, lng: 139.7967, address: null,
+  price: null, currency: null, reservationStatus: null, reservationNotes: null,
+  reservationDatetime: null, placeTime: null, endTime: null, durationMinutes: 60,
+  notes: null, imageUrl: null, googlePlaceId: null, googleFtid: null, osmId: null,
+  routeGeometry: null, routeColor: null, website: null, phone: null, transportMode: null,
+  createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-03T00:00:00.000Z', deletedAt: null,
+}
+const assignment: SyncedAssignment = {
+  schemaVersion: 1, id: '44444444-4444-4444-8444-444444444444', tripId: trip.id,
+  dayId: day.id, placeId: place.id, orderIndex: 0, notes: 'Morning', assignmentTime: '09:00',
+  assignmentEndTime: null, legTransportMode: 'walking', incomingLegTransportMode: null,
+  createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-04T00:00:00.000Z', deletedAt: null,
 }
 
 function response(value: unknown, status = 200): Response {
@@ -181,6 +198,64 @@ describe('GitHubSyncProvider', () => {
     const treeRequest = requests.find(request => request.url.endsWith('/git/trees'))!
     expect(JSON.parse(String(treeRequest.init.body)).tree.map((entry: { path: string }) => entry.path)).toEqual([
       `trips/${trip.id}/days.json`, 'manifest.json',
+    ])
+  })
+
+  it('pulls Place and Assignment files in dependency order', async () => {
+    const placesPath = `trips/${trip.id}/places.json`
+    const assignmentsPath = `trips/${trip.id}/assignments.json`
+    const manifest: GitHubManifest = {
+      schemaVersion: 1, updatedAt: assignment.updatedAt,
+      trips: { [trip.id]: { path: `trips/${trip.id}/trip.json`, updatedAt: trip.updatedAt, deletedAt: null, contentHash: 'trip-v1' } },
+      days: { [day.id]: { path: `trips/${trip.id}/days.json`, tripId: trip.id, updatedAt: day.updatedAt, deletedAt: null, contentHash: 'day-v1' } },
+      places: { [place.id]: { path: placesPath, tripId: trip.id, updatedAt: place.updatedAt, deletedAt: null, contentHash: 'place-v1' } },
+      assignments: { [assignment.id]: { path: assignmentsPath, tripId: trip.id, dayId: day.id, placeId: place.id, updatedAt: assignment.updatedAt, deletedAt: null, contentHash: 'assignment-v1' } },
+    }
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async input => {
+      const url = String(input)
+      if (url.endsWith('/repos/me/travel-data')) return response({ permissions: { push: true } })
+      if (url.includes('/git/ref/heads/main')) return response({ object: { sha: 'head-all' } })
+      if (url.includes('/contents/manifest.json')) return response(file(manifest))
+      if (url.includes(`/contents/trips/${trip.id}/trip.json`)) return response(file(trip))
+      if (url.includes(`/contents/trips/${trip.id}/days.json`)) return response(file({ schemaVersion: 1, tripId: trip.id, updatedAt: day.updatedAt, days: [day] }))
+      if (url.includes(`/contents/${placesPath}`)) return response(file({ schemaVersion: 1, tripId: trip.id, updatedAt: place.updatedAt, places: [place] }))
+      if (url.includes(`/contents/${assignmentsPath}`)) return response(file({ schemaVersion: 1, tripId: trip.id, updatedAt: assignment.updatedAt, assignments: [assignment] }))
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const provider = new GitHubSyncProvider(config, 'secret')
+    await provider.connect()
+    const result = await provider.pull()
+    expect(result.changes.map(change => change.entityType)).toEqual(['trip', 'day', 'place', 'assignment'])
+    expect(result.changes[3]).toMatchObject({ entityId: assignment.id, payload: assignment })
+  })
+
+  it('patches Trip-scoped Place and Assignment files in one commit', async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = []
+    let blob = 0
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init = {}) => {
+      const url = String(input)
+      requests.push({ url, init })
+      if (url.endsWith('/repos/me/travel-data')) return response({ permissions: { push: true } })
+      if (url.includes('/git/ref/heads/main')) return response({ object: { sha: 'head-1' } })
+      if (url.includes('/git/commits/head-1')) return response({ tree: { sha: 'tree-1' } })
+      if (url.includes('/contents/manifest.json')) return response(file({ ...EMPTY_MANIFEST }))
+      if (url.includes(`/contents/trips/${trip.id}/places.json`) || url.includes(`/contents/trips/${trip.id}/assignments.json`)) return response({ message: 'Not Found' }, 404)
+      if (url.endsWith('/git/blobs')) return response({ sha: `blob-${++blob}` })
+      if (url.endsWith('/git/trees')) return response({ sha: 'tree-2' })
+      if (url.endsWith('/git/commits')) return response({ sha: 'commit-2' })
+      if (url.includes('/git/refs/heads/main')) return response({})
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const provider = new GitHubSyncProvider(config, 'secret')
+    await provider.connect()
+    const result = await provider.push([
+      { entityType: 'place', entityId: place.id, operation: 'upsert', payload: place },
+      { entityType: 'assignment', entityId: assignment.id, operation: 'upsert', payload: assignment },
+    ], 'head-1')
+    expect(result.versions).toMatchObject({ [place.id]: `${place.updatedAt}:active`, [assignment.id]: `${assignment.updatedAt}:active` })
+    const treeRequest = requests.find(request => request.url.endsWith('/git/trees'))!
+    expect(JSON.parse(String(treeRequest.init.body)).tree.map((entry: { path: string }) => entry.path)).toEqual([
+      `trips/${trip.id}/places.json`, `trips/${trip.id}/assignments.json`, 'manifest.json',
     ])
   })
 })

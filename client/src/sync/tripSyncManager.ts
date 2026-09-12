@@ -15,6 +15,7 @@ import {
   offlineDb,
   upsertTrip,
   upsertDays,
+  upsertAssignmentsFromDays,
   upsertPlaces,
   upsertPackingItems,
   upsertTodoItems,
@@ -116,6 +117,7 @@ async function syncTrip(tripId: number): Promise<void> {
   await upsertTrip(bundle.trip)
   await upsertDays(bundle.days)
   await upsertPlaces(bundle.places)
+  await upsertAssignmentsFromDays(bundle.days)
   await upsertPackingItems(bundle.packingItems)
   await upsertTodoItems(bundle.todoItems)
   await upsertBudgetItems(bundle.budgetItems)

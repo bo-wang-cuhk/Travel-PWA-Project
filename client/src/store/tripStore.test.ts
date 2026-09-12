@@ -16,7 +16,8 @@ import {
   buildTrip,
   buildTripFile,
 } from '../../tests/helpers/factories';
-import { offlineDb } from '../db/offlineDb';
+import { offlineDb, upsertDays, upsertPlaces, upsertTrip } from '../db/offlineDb';
+import { randomId } from '../utils/randomId';
 import { setForcedOffline } from '../sync/networkMode';
 import { useTripStore } from './tripStore';
 
@@ -26,6 +27,7 @@ async function clearCache(): Promise<void> {
     offlineDb.trips.clear(),
     offlineDb.days.clear(),
     offlineDb.places.clear(),
+    offlineDb.assignments.clear(),
     offlineDb.packingItems.clear(),
     offlineDb.todoItems.clear(),
     offlineDb.budgetItems.clear(),
@@ -40,7 +42,7 @@ beforeEach(async () => {
   resetAllStores();
   server.resetHandlers();
   await clearCache();
-  await offlineDb.trips.put(buildTrip({ id: 1, title: 'Paris' }));
+  await upsertTrip(buildTrip({ id: 1, title: 'Paris' }));
 });
 
 afterEach(() => {
@@ -62,6 +64,31 @@ function serverDays() {
     // A day row that arrives without the embedded arrays at all.
     buildDay({ id: 2, trip_id: 1, day_number: 2, assignments: undefined, notes_items: undefined }),
   ];
+}
+
+async function seedLocalPlannerData(placeId = 500): Promise<void> {
+  const days = serverDays()
+  const place = buildPlace({ id: placeId, trip_id: 1 })
+  await upsertDays(days)
+  await upsertPlaces([place])
+  const trip = await offlineDb.trips.get(1)
+  const day = await offlineDb.days.get(1)
+  const storedPlace = await offlineDb.places.get(placeId)
+  await offlineDb.assignments.put({
+    id: 900,
+    sync_id: randomId(),
+    trip_id: 1,
+    trip_sync_id: trip!.sync_id!,
+    day_id: 1,
+    day_sync_id: day!.sync_id!,
+    place_id: placeId,
+    place_sync_id: storedPlace!.sync_id!,
+    order_index: 0,
+    notes: null,
+    created_at: '2025-01-01T00:00:00.000Z',
+    updated_at: '2025-01-01T00:00:00.000Z',
+    deleted_at: null,
+  })
 }
 
 describe('tripStore', () => {
@@ -127,10 +154,9 @@ describe('tripStore', () => {
 
   describe('loadTrip', () => {
     it('FE-TSTORE-003: fills every slice and builds the assignments/dayNotes maps', async () => {
+      await seedLocalPlannerData()
       server.use(
         http.get('/api/trips/1', () => HttpResponse.json({ trip: buildTrip({ id: 1, title: 'Paris' }) })),
-        http.get('/api/trips/1/days', () => HttpResponse.json({ days: serverDays() })),
-        http.get('/api/trips/1/places', () => HttpResponse.json({ places: [buildPlace({ id: 500, trip_id: 1 })] })),
         http.get('/api/trips/1/packing', () => HttpResponse.json({ items: [buildPackingItem({ id: 60, trip_id: 1 })] })),
         http.get('/api/trips/1/todo', () => HttpResponse.json({ items: [buildTodoItem({ id: 70, trip_id: 1 })] })),
         http.get('/api/trips/1/budget', () => HttpResponse.json({ items: [buildBudgetItem({ id: 80, trip_id: 1 })] })),
@@ -284,11 +310,10 @@ describe('tripStore', () => {
 
   describe('hydrateActiveTrip', () => {
     it('FE-TSTORE-008: silently re-pulls every collaborative slice and nudges the planner', async () => {
+      await seedLocalPlannerData(501)
       seedStore(useTripStore, { trip: buildTrip({ id: 1 }), places: [], days: [] });
 
       server.use(
-        http.get('/api/trips/1/days', () => HttpResponse.json({ days: serverDays() })),
-        http.get('/api/trips/1/places', () => HttpResponse.json({ places: [buildPlace({ id: 501, trip_id: 1 })] })),
         http.get('/api/trips/1/packing', () => HttpResponse.json({ items: [buildPackingItem({ id: 61, trip_id: 1 })] })),
         http.get('/api/trips/1/todo', () => HttpResponse.json({ items: [buildTodoItem({ id: 71, trip_id: 1 })] })),
         http.get('/api/trips/1/budget', () => HttpResponse.json({ items: [buildBudgetItem({ id: 81, trip_id: 1 })] })),
@@ -316,12 +341,11 @@ describe('tripStore', () => {
 
     it('FE-TSTORE-009: one failing resource does not wipe the others', async () => {
       const stalePlace = buildPlace({ id: 111, trip_id: 1, name: 'Kept' });
+      await upsertPlaces([stalePlace])
       seedStore(useTripStore, { places: [stalePlace], packingItems: [], todoItems: [] });
       vi.spyOn(console, 'error').mockImplementation(() => {});
 
       server.use(
-        http.get('/api/trips/1/days', () => HttpResponse.json({ days: [] })),
-        http.get('/api/trips/1/places', () => HttpResponse.json({ error: 'nope' }, { status: 500 })),
         http.get('/api/trips/1/packing', () => HttpResponse.json({ error: 'nope' }, { status: 500 })),
         http.get('/api/trips/1/todo', () => HttpResponse.json({ items: [buildTodoItem({ id: 72, trip_id: 1 })] })),
       );
@@ -335,8 +359,8 @@ describe('tripStore', () => {
 
   describe('refreshDays', () => {
     it('FE-TSTORE-010: rebuilds the days list plus the assignments and notes maps', async () => {
+      await seedLocalPlannerData()
       seedStore(useTripStore, { days: [], assignments: { '99': [] }, dayNotes: { '99': [] } });
-      server.use(http.get('/api/trips/1/days', () => HttpResponse.json({ days: serverDays() })));
 
       await useTripStore.getState().refreshDays(1);
 
@@ -348,18 +372,13 @@ describe('tripStore', () => {
       expect(state.assignments['99']).toBeUndefined();
     });
 
-    it('FE-TSTORE-011: swallows a failing day list and keeps the current days', async () => {
-      const day = buildDay({ id: 1, trip_id: 1 });
-      seedStore(useTripStore, { days: [day] });
-      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-      server.use(
-        http.get('/api/trips/1/days', () => HttpResponse.json({ error: 'boom' }, { status: 500 })),
-      );
-
-      await expect(useTripStore.getState().refreshDays(1)).resolves.toBeUndefined();
-
-      expect(useTripStore.getState().days.map(d => d.id)).toEqual([1]);
-      expect(consoleError).toHaveBeenCalled();
+    it('FE-TSTORE-011: refreshes Days from IndexedDB without a Server request', async () => {
+      await upsertDays([buildDay({ id: 1, trip_id: 1 })])
+      seedStore(useTripStore, { days: [] });
+      const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      await useTripStore.getState().refreshDays(1)
+      expect(useTripStore.getState().days.map(d => d.id)).toEqual([1])
+      expect(fetchSpy).not.toHaveBeenCalled()
     });
   });
 

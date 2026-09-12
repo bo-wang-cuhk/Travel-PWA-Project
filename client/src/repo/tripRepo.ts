@@ -3,6 +3,7 @@ import type { Trip } from '../types'
 import type { ActiveTripResponse, TripCreateRequest, TripUpdateRequest } from '@trek/shared'
 import type { LocalTripRecord } from '../domain/tripSyncModel'
 import type { LocalDayRecord } from '../domain/daySyncModel'
+import type { LocalAssignmentRecord } from '../domain/assignmentSyncModel'
 import { randomId } from '../utils/randomId'
 import { markLocalChange } from '../sync/localChangeRepository'
 
@@ -178,7 +179,7 @@ export const tripRepo = {
 
   async update(tripId: number | string, data: TripUpdateRequest): Promise<{ trip: LocalTripRecord }> {
     const id = Number(tripId)
-    return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.days, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
+    return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.days, offlineDb.assignments, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
       const current = await offlineDb.trips.get(id)
       if (!current || current.deleted_at) throw new Error('Trip not found in local database')
       const { date_shift_mode: _dateShiftMode, ...patch } = data
@@ -221,6 +222,14 @@ export const tripRepo = {
           }
           await offlineDb.days.put(updated)
           await markLocalChange('day', updated.sync_id, updated.deleted_at ? 'delete' : 'upsert')
+          if (updated.deleted_at) {
+            const assignments = await offlineDb.assignments.where('day_id').equals(updated.id).toArray() as LocalAssignmentRecord[]
+            for (const assignment of assignments.filter(item => !item.deleted_at)) {
+              const tombstone = { ...assignment, deleted_at: now, updated_at: now }
+              await offlineDb.assignments.put(tombstone)
+              await markLocalChange('assignment', tombstone.sync_id, 'delete')
+            }
+          }
         }
         let nextDayId = await nextLocalDayId()
         for (let index = days.length; index < desiredDayCount; index++) {

@@ -2,9 +2,9 @@
 
 ## 1. Current architecture
 
-TREK originally treats the server as the source of truth. Its existing Dexie database is an offline cache and its `mutationQueue` replays REST requests. In the standalone PWA, Trip and Day CRUD now use their repositories and IndexedDB, while most other child modules remain server-backed.
+TREK originally treats the server as the source of truth. Its existing Dexie database is an offline cache and its `mutationQueue` replays REST requests. In the standalone PWA, Trip, Day, Place and Assignment CRUD now use their repositories and IndexedDB, while later child modules remain server-backed.
 
-The first migration phase makes Trip local-first and adds a separate provider-neutral sync path. The legacy server cache sync remains intact for non-standalone TREK operation.
+The migration proceeds by dependency boundary: Trip, then Day, then Place and Assignment. The legacy server cache sync remains intact for non-standalone TREK operation.
 
 ## 2. Target architecture
 
@@ -31,7 +31,7 @@ No UI write waits for a provider request. Provider errors affect sync status onl
 Local write:
 
 ```text
-Trip/Day Repository transaction
+Trip/Day/Place/Assignment Repository transaction
   ├── write the domain row
   ├── upsert syncOutbox
   └── mark entitySyncMeta pending
@@ -45,11 +45,13 @@ Repositories own local business CRUD, timestamps, UUID creation, tombstones and 
 
 ## 5. IndexedDB responsibility
 
-Dexie is the working database and persists business rows, provider-neutral sync metadata, conflicts, provider configuration and device-local credentials. Version 6 migrates existing Trip rows and version 7 migrates existing Day rows without clearing data.
+Dexie is the working database and persists business rows, provider-neutral sync metadata, conflicts, provider configuration and device-local credentials. Version 6 migrates Trip, version 7 migrates Day, and version 8 migrates Place and Assignment without clearing data.
 
-The numeric `Trip.id` and `Day.id` remain temporary local compatibility keys because un-migrated child tables use numeric foreign keys. `sync_id` is the canonical UUID exported to providers, and `Day.trip_sync_id` is its provider-neutral parent reference. Numeric ids are never exported.
+Numeric ids remain temporary local compatibility keys. `sync_id` is the canonical UUID exported to providers. Day and Place carry a Trip UUID; Assignment carries Trip, Day and Place UUIDs. Numeric ids are never exported.
 
 Version 7 adds Day UUIDs, parent UUIDs, timestamps and tombstones, then queues existing rows for their first provider sync. Orphaned legacy rows are marked with an `orphan:<numeric-id>` parent reference rather than silently deleted.
+
+Version 8 gives Place the same lifecycle metadata and extracts legacy Assignments embedded in cached Day rows into a dedicated table. Missing parent relations are marked as migration errors and are not uploaded. Category ids, ratings and participants remain local/server projections until those modules are migrated.
 
 ## 6. SyncManager responsibility
 
@@ -63,7 +65,7 @@ Providers implement `connect`, `disconnect`, `pull`, `push` and `getStatus`. Cur
 
 ## 8. GitHubSyncProvider responsibility
 
-The GitHub provider validates access, initializes an empty repository, reads the manifest and Trip/Day documents, maps Git state to opaque versions, and writes all changed files plus the manifest in one Git tree commit. The branch ref is advanced with `force: false`; a moved ref causes a pull/retry instead of an overwrite.
+The GitHub provider validates access, initializes an empty repository, reads the manifest and Trip-scoped documents, maps Git state to opaque versions, and writes all changed files plus the manifest in one Git tree commit. The branch ref is advanced with `force: false`; a moved ref causes a pull/retry instead of an overwrite.
 
 ## 9. GitHub data layout
 
@@ -71,9 +73,11 @@ The GitHub provider validates access, initializes an empty repository, reads the
 manifest.json
 trips/<trip-uuid>/trip.json
 trips/<trip-uuid>/days.json
+trips/<trip-uuid>/places.json
+trips/<trip-uuid>/assignments.json
 ```
 
-The manifest contains schema version and per-entity path, parent UUID, timestamps, tombstone and opaque content version. It does not duplicate domain payloads. Days are grouped by Trip in `days.json`, while conflict metadata remains per Day so different Days can merge independently.
+The manifest contains schema version and per-entity path, parent UUIDs, timestamps, tombstone and opaque content version. It does not duplicate domain payloads. Child entities are grouped by Trip in their respective files, while conflict metadata remains per entity.
 
 ## 10. Sync sequence
 
@@ -88,7 +92,7 @@ The manifest contains schema version and per-entity path, parent UUID, timestamp
 
 ## 11. Conflict strategy
 
-If local and remote both changed since `remoteVersion`, the local Trip or Day remains the visible working copy. Local and remote snapshots are stored in `syncConflicts`, the entity and outbox are marked `conflict`, and that entity is not pushed. Resolution UI is intentionally deferred, but both versions are retained.
+If local and remote both changed since `remoteVersion`, the local entity remains the visible working copy. Local and remote snapshots are stored in `syncConflicts`, the entity and outbox are marked `conflict`, and that entity is not pushed. Resolution UI is intentionally deferred, but both versions are retained.
 
 ## 12. Token strategy
 
@@ -98,7 +102,7 @@ A static PWA cannot protect a stored token from malicious code executing in the 
 
 ## 13. Schema migration strategy
 
-All changes use Dexie version upgrades. Version 6 backfills Trip UUIDs, timestamps and `deleted_at`; version 7 does the same for Day and adds its parent UUID/indexes. No reinstall, storage clear or destructive migration is required. Tombstones are retained until a future garbage-collection policy is implemented.
+All changes use Dexie version upgrades. Version 6 backfills Trip; version 7 adds Day identity and parent indexes; version 8 adds Place identity and the Assignment table. No reinstall, storage clear or destructive migration is required. Tombstones are retained until a future garbage-collection policy is implemented.
 
 ## 14. Future Supabase integration
 
@@ -106,8 +110,8 @@ All changes use Dexie version upgrades. Version 6 backfills Trip UUIDs, timestam
 
 ## Implemented boundary
 
-Trip and Day are migrated. Creating a Trip creates its Day grid locally; changing its date range re-pins active Days and tombstones removed slots. Day list/create/update/default-transport/reorder/delete are local-first and sync through the provider-neutral outbox.
+Trip, Day, Place and Assignment are migrated. Place CRUD/bulk operations and Assignment create/update/time/notes/transport/reorder/move/delete are local-first and sync through the provider-neutral outbox. Deleting a Day or Place also writes Assignment tombstones.
 
-Place, Assignment, DayNote items, Expense, Reservation, Todo, Packing, files, collaboration, Auth and server removal are not implemented. Day title and whole-day notes are fields of Day and are migrated; the separate DayNote item collection is not.
+DayNote items, Expense, Reservation, Todo, Packing, files, collaboration, Auth and server removal are not implemented. Day title and whole-day notes are fields of Day and are migrated; the separate DayNote item collection is not. Place image upload and collaborative rating, plus Assignment participants, remain online-only enhancements.
 
-The legacy TREK Server cache/WebSocket path remains for non-standalone use, but it is not part of the GitHub Pages write path. “Clear offline data” retains Trip and Day working rows and only removes disposable, not-yet-migrated caches.
+The legacy TREK Server cache/WebSocket path remains for non-standalone use, but it is not part of the GitHub Pages core write path. “Clear offline data” retains Trip, Day, Place and Assignment working rows and only removes disposable, not-yet-migrated caches.
