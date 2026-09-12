@@ -232,7 +232,7 @@ describe('offlineDb — blob cache budget', () => {
 })
 
 describe('offlineDb — clearTripData', () => {
-  it('FE-DB-OFFLINE-018: drops the trip\'s read cache and leaves other trips alone', async () => {
+  it('FE-DB-OFFLINE-018: clears disposable caches but retains local-first Trip and Day rows', async () => {
     await upsertTrip(buildTrip({ id: 1 }))
     await upsertTrip(buildTrip({ id: 2 }))
     await upsertDays([buildDay({ id: 1, trip_id: 1 }), buildDay({ id: 2, trip_id: 2 })])
@@ -250,8 +250,8 @@ describe('offlineDb — clearTripData', () => {
 
     await clearTripData(1)
 
-    expect(await offlineDb.trips.get(1)).toBeUndefined()
-    expect(await offlineDb.days.where('trip_id').equals(1).count()).toBe(0)
+    expect(await offlineDb.trips.get(1)).toBeDefined()
+    expect(await offlineDb.days.where('trip_id').equals(1).count()).toBe(1)
     expect(await offlineDb.places.where('trip_id').equals(1).count()).toBe(0)
     expect(await offlineDb.packingItems.count()).toBe(0)
     expect(await offlineDb.todoItems.count()).toBe(0)
@@ -377,6 +377,50 @@ describe('offlineDb — connection proxy', () => {
     expect(migratedTrip?.sync_id).toMatch(/^[0-9a-f-]{36}$/i)
     expect(migratedTrip?.deleted_at).toBeNull()
     expect(await offlineDb.syncOutbox.get(`trip:${migratedTrip!.sync_id}`)).toMatchObject({ status: 'pending', operation: 'upsert' })
+  })
+
+  it('FE-DB-OFFLINE-030: upgrading v6 backfills Day UUIDs, parent UUIDs and sync rows', async () => {
+    const name = 'trek-offline-u57'
+    const legacy = new Dexie(name)
+    legacy.version(6).stores({
+      trips: 'id, &sync_id, deleted_at, updated_at',
+      days: 'id, trip_id',
+      places: 'id, trip_id',
+      packingItems: 'id, trip_id',
+      todoItems: 'id, trip_id',
+      budgetItems: 'id, trip_id',
+      reservations: 'id, trip_id',
+      tripFiles: 'id, trip_id',
+      accommodations: 'id, trip_id',
+      tripMembers: '[tripId+id], tripId',
+      tags: 'id',
+      categories: 'id',
+      mutationQueue: 'id, tripId, status, createdAt',
+      syncMeta: 'tripId',
+      blobCache: 'url, cachedAt, tripId',
+      importFiles: '[jobId+fileName], jobId, createdAt',
+      appMeta: 'key',
+      syncOutbox: 'key, [entityType+entityId], status, changedAt',
+      entitySyncMeta: 'key, [entityType+entityId], status',
+      syncState: 'providerId, status',
+      syncConflicts: 'key, [entityType+entityId], detectedAt',
+      syncProviderConfig: 'providerId',
+      syncCredentials: 'providerId',
+    })
+    const tripSyncId = '11111111-1111-4111-8111-111111111111'
+    await legacy.open()
+    await legacy.table('trips').put({ ...buildTrip({ id: 710 }), sync_id: tripSyncId, deleted_at: null })
+    await legacy.table('days').put(buildDay({ id: 711, trip_id: 710, day_number: 1 }))
+    legacy.close()
+
+    await reopenForUser(57)
+
+    const day = await offlineDb.days.get(711)
+    expect(day?.sync_id).toMatch(/^[0-9a-f-]{36}$/i)
+    expect(day?.trip_sync_id).toBe(tripSyncId)
+    expect(day?.deleted_at).toBeNull()
+    expect(await offlineDb.syncOutbox.get(`day:${day!.sync_id}`)).toMatchObject({ entityType: 'day', operation: 'upsert', status: 'pending' })
+    expect(await offlineDb.entitySyncMeta.get(`day:${day!.sync_id}`)).toMatchObject({ status: 'pending' })
   })
 })
 

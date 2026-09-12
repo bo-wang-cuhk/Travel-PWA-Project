@@ -4,20 +4,22 @@ import { server } from '../../../tests/helpers/msw/server';
 import { resetAllStores, seedStore } from '../../../tests/helpers/store';
 import { buildDay, buildDayNote } from '../../../tests/helpers/factories';
 import { useTripStore } from '../tripStore';
+import { dayRepo } from '../../repo/dayRepo';
+
+vi.mock('../../repo/dayRepo', () => ({
+  dayRepo: { update: vi.fn().mockResolvedValue({ day: {} }) },
+}));
 
 beforeEach(() => {
   resetAllStores();
   server.resetHandlers();
+  vi.mocked(dayRepo.update).mockReset().mockResolvedValue({ day: {} as never });
 });
 
 describe('dayNotesSlice', () => {
   it('FE-TSLICE-NOTES-001: updateDayNotes throws the server message and leaves the day untouched', async () => {
     seedStore(useTripStore, { days: [buildDay({ id: 1, trip_id: 1, notes: 'original' })] });
-    server.use(
-      http.put('/api/trips/1/days/1', () =>
-        HttpResponse.json({ error: 'Notes too long' }, { status: 422 }),
-      ),
-    );
+    vi.mocked(dayRepo.update).mockRejectedValueOnce(new Error('Notes too long'));
 
     await expect(useTripStore.getState().updateDayNotes(1, 1, 'x'.repeat(10))).rejects.toThrow('Notes too long');
     expect(useTripStore.getState().days[0].notes).toBe('original');
@@ -25,11 +27,7 @@ describe('dayNotesSlice', () => {
 
   it('FE-TSLICE-NOTES-002: updateDayTitle throws the server message and leaves the title untouched', async () => {
     seedStore(useTripStore, { days: [buildDay({ id: 1, trip_id: 1, title: 'Day one' })] });
-    server.use(
-      http.put('/api/trips/1/days/1', () =>
-        HttpResponse.json({ error: 'Title rejected' }, { status: 422 }),
-      ),
-    );
+    vi.mocked(dayRepo.update).mockRejectedValueOnce(new Error('Title rejected'));
 
     await expect(useTripStore.getState().updateDayTitle(1, 1, 'New title')).rejects.toThrow('Title rejected');
     expect(useTripStore.getState().days[0].title).toBe('Day one');

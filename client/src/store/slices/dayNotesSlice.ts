@@ -1,4 +1,5 @@
-import { daysApi, dayNotesApi } from '../../api/client'
+import { dayNotesApi } from '../../api/client'
+import { dayRepo } from '../../repo/dayRepo'
 import type { StoreApi } from 'zustand'
 import type { TripStoreState } from '../tripStore'
 import type { DayNote } from '../../types'
@@ -19,7 +20,7 @@ export interface DayNotesSlice {
 export const createDayNotesSlice = (set: SetState, get: GetState): DayNotesSlice => ({
   updateDayNotes: async (tripId, dayId, notes) => {
     try {
-      await daysApi.update(tripId, dayId, { notes })
+      await dayRepo.update(tripId, dayId, { notes })
       set(state => ({
         days: state.days.map(d => d.id === Number.parseInt(String(dayId)) ? { ...d, notes } : d)
       }))
@@ -30,7 +31,7 @@ export const createDayNotesSlice = (set: SetState, get: GetState): DayNotesSlice
 
   updateDayTitle: async (tripId, dayId, title) => {
     try {
-      await daysApi.update(tripId, dayId, { title })
+      await dayRepo.update(tripId, dayId, { title })
       set(state => ({
         days: state.days.map(d => d.id === Number.parseInt(String(dayId)) ? { ...d, title } : d)
       }))

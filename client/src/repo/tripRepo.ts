@@ -2,6 +2,7 @@ import { offlineDb } from '../db/offlineDb'
 import type { Trip } from '../types'
 import type { ActiveTripResponse, TripCreateRequest, TripUpdateRequest } from '@trek/shared'
 import type { LocalTripRecord } from '../domain/tripSyncModel'
+import type { LocalDayRecord } from '../domain/daySyncModel'
 import { randomId } from '../utils/randomId'
 import { markLocalChange } from '../sync/localChangeRepository'
 
@@ -20,9 +21,37 @@ function inclusiveDayCount(startDate?: string | null, endDate?: string | null): 
   return Math.round((end - start) / 86_400_000) + 1
 }
 
+function addUtcDays(date: string, days: number): string {
+  const value = new Date(`${date}T00:00:00Z`)
+  value.setUTCDate(value.getUTCDate() + days)
+  return value.toISOString().slice(0, 10)
+}
+
 async function nextLocalTripId(): Promise<number> {
   const first = await offlineDb.trips.orderBy('id').first()
   return first && first.id < 0 ? first.id - 1 : -1
+}
+
+async function nextLocalDayId(): Promise<number> {
+  const first = await offlineDb.days.orderBy('id').first()
+  return first && first.id < 0 ? first.id - 1 : -1
+}
+
+function localDay(id: number, trip: LocalTripRecord, dayNumber: number, now: string): LocalDayRecord {
+  return {
+    id,
+    sync_id: randomId(),
+    trip_id: trip.id,
+    trip_sync_id: trip.sync_id,
+    day_number: dayNumber,
+    date: trip.start_date ? addUtcDays(trip.start_date, dayNumber - 1) : null,
+    title: null,
+    notes: null,
+    default_transport_mode: null,
+    created_at: now,
+    updated_at: now,
+    deleted_at: null,
+  }
 }
 
 function tripFromCreate(
@@ -133,21 +162,31 @@ export const tripRepo = {
   },
 
   async create(data: TripCreateRequest, owner?: LocalTripOwner): Promise<{ trip: LocalTripRecord }> {
-    return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
+    return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.days, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
       const trip = tripFromCreate(await nextLocalTripId(), data, owner, new Date().toISOString())
       await offlineDb.trips.add(trip)
       await markLocalChange('trip', trip.sync_id, 'upsert')
+      let dayId = await nextLocalDayId()
+      for (let dayNumber = 1; dayNumber <= (trip.day_count ?? 0); dayNumber++) {
+        const day = localDay(dayId--, trip, dayNumber, trip.created_at)
+        await offlineDb.days.add(day)
+        await markLocalChange('day', day.sync_id, 'upsert')
+      }
       return { trip }
     })
   },
 
   async update(tripId: number | string, data: TripUpdateRequest): Promise<{ trip: LocalTripRecord }> {
     const id = Number(tripId)
-    return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
+    return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.days, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
       const current = await offlineDb.trips.get(id)
       if (!current || current.deleted_at) throw new Error('Trip not found in local database')
       const { date_shift_mode: _dateShiftMode, ...patch } = data
       void _dateShiftMode
+      const nextStart = patch.start_date === undefined ? current.start_date : patch.start_date
+      const nextEnd = patch.end_date === undefined ? current.end_date : patch.end_date
+      const desiredDayCount = inclusiveDayCount(nextStart, nextEnd) ?? patch.day_count ?? current.day_count ?? 0
+      const now = new Date().toISOString()
       const trip: LocalTripRecord = {
         ...current,
         ...patch,
@@ -157,14 +196,39 @@ export const tripRepo = {
         is_archived: patch.is_archived == null
           ? current.is_archived
           : Number(Boolean(patch.is_archived)),
-        day_count: inclusiveDayCount(
-          patch.start_date === undefined ? current.start_date : patch.start_date,
-          patch.end_date === undefined ? current.end_date : patch.end_date,
-        ) ?? patch.day_count ?? current.day_count,
-        updated_at: new Date().toISOString(),
+        day_count: desiredDayCount,
+        updated_at: now,
       }
       await offlineDb.trips.put(trip)
       await markLocalChange('trip', trip.sync_id, 'upsert')
+
+      const dayGridChanged = patch.start_date !== undefined || patch.end_date !== undefined || patch.day_count !== undefined
+      if (dayGridChanged) {
+        const days = (await offlineDb.days.where('trip_id').equals(id).toArray())
+          .filter(day => !day.deleted_at)
+          .sort((a, b) => (a.day_number ?? 0) - (b.day_number ?? 0)) as LocalDayRecord[]
+        for (let index = 0; index < days.length; index++) {
+          const currentDay = days[index]
+          const updated: LocalDayRecord = {
+            ...currentDay,
+            sync_id: currentDay.sync_id || randomId(),
+            trip_sync_id: currentDay.trip_sync_id || trip.sync_id,
+            created_at: currentDay.created_at || now,
+            updated_at: now,
+            deleted_at: index < desiredDayCount ? null : now,
+            day_number: index + 1,
+            date: index < desiredDayCount ? (nextStart ? addUtcDays(nextStart, index) : null) : currentDay.date ?? null,
+          }
+          await offlineDb.days.put(updated)
+          await markLocalChange('day', updated.sync_id, updated.deleted_at ? 'delete' : 'upsert')
+        }
+        let nextDayId = await nextLocalDayId()
+        for (let index = days.length; index < desiredDayCount; index++) {
+          const day = localDay(nextDayId--, trip, index + 1, now)
+          await offlineDb.days.add(day)
+          await markLocalChange('day', day.sync_id, 'upsert')
+        }
+      }
       return { trip }
     })
   },

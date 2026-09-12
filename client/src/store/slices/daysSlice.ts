@@ -1,4 +1,4 @@
-import { daysApi } from '../../api/client'
+import { dayRepo } from '../../repo/dayRepo'
 import type { StoreApi } from 'zustand'
 import type { TripStoreState } from '../tripStore'
 import type { Day } from '../../types'
@@ -32,9 +32,10 @@ export const createDaysSlice = (set: SetState, get: GetState): DaysSlice => ({
     set({ days: optimistic })
 
     try {
-      await daysApi.reorder(tripId, orderedIds)
-      await get().refreshDays(tripId)
-      await get().loadReservations(tripId)
+      const result = await dayRepo.reorder(tripId, orderedIds)
+      set({ days: result.days })
+      // Reservation date re-stamping remains outside phase 2A. Day persistence
+      // is complete here and deliberately makes no server request.
     } catch (err: unknown) {
       set({ days: prevDays })
       throw new Error(getApiErrorMessage(err, 'Error reordering days'))
@@ -45,9 +46,8 @@ export const createDaysSlice = (set: SetState, get: GetState): DaysSlice => ({
   // trip this extends the trip by one day and re-pins dates server-side.
   insertDay: async (tripId, position) => {
     try {
-      const result = await daysApi.create(tripId, { position })
+      const result = await dayRepo.create(tripId, { position })
       await get().refreshDays(tripId)
-      await get().loadReservations(tripId)
       return result.day
     } catch (err: unknown) {
       throw new Error(getApiErrorMessage(err, 'Error adding day'))

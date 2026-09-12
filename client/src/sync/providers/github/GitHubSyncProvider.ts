@@ -1,7 +1,8 @@
+import type { SyncedDay } from '../../../domain/daySyncModel'
 import type { SyncedTrip } from '../../../domain/tripSyncModel'
 import type { GitHubSyncPublicConfig, LocalChange, ProviderStatus, PushResult, RemoteChanges, SyncProvider } from '../../types'
 import { GitHubApi, GitHubApiError } from './githubApi'
-import { EMPTY_MANIFEST, type GitHubManifest } from './githubTypes'
+import { EMPTY_MANIFEST, type GitHubDaysFile, type GitHubManifest } from './githubTypes'
 
 export class RemoteAdvancedError extends Error {
   constructor() {
@@ -56,7 +57,7 @@ export class GitHubSyncProvider implements SyncProvider {
     }
     if (manifest.schemaVersion !== 1) throw new Error(`Unsupported sync schema: ${manifest.schemaVersion}`)
 
-    const changes = await Promise.all(Object.entries(manifest.trips).map(async ([entityId, entry]) => {
+    const tripChanges = await Promise.all(Object.entries(manifest.trips).map(async ([entityId, entry]) => {
       if (entry.deletedAt) {
         return { entityType: 'trip' as const, entityId, operation: 'delete' as const, remoteVersion: entry.contentHash }
       }
@@ -69,7 +70,29 @@ export class GitHubSyncProvider implements SyncProvider {
         payload: trip.value,
       }
     }))
-    return { cursor: head, changes }
+
+    const dayFiles = new Map<string, Promise<GitHubDaysFile>>()
+    const visibleDayEntries = Object.entries(manifest.days ?? {}).filter(([, entry]) => !manifest.trips[entry.tripId]?.deletedAt)
+    const dayChanges = await Promise.all(visibleDayEntries.map(async ([entityId, entry]) => {
+      let filePromise = dayFiles.get(entry.path)
+      if (!filePromise) {
+        filePromise = this.api.getFile<GitHubDaysFile>(entry.path).then(result => result.value)
+        dayFiles.set(entry.path, filePromise)
+      }
+      const file = await filePromise
+      if (file.schemaVersion !== 1 || file.tripId !== entry.tripId) throw new Error(`Invalid remote days file ${entry.path}`)
+      const payload = file.days.find(day => day.id === entityId)
+      if (!payload) throw new Error(`Remote day ${entityId} is missing from ${entry.path}`)
+      return {
+        entityType: 'day' as const,
+        entityId,
+        operation: entry.deletedAt ? 'delete' as const : 'upsert' as const,
+        remoteVersion: entry.contentHash,
+        payload,
+      }
+    }))
+    // Parent Trips must be applied before their Days on an empty device.
+    return { cursor: head, changes: [...tripChanges, ...dayChanges] }
   }
 
   async push(changes: LocalChange[], cursor?: string | null): Promise<PushResult> {
@@ -86,14 +109,19 @@ export class GitHubSyncProvider implements SyncProvider {
     try { manifest = (await this.api.getFile<GitHubManifest>('manifest.json')).value }
     catch (error) {
       if (!(error instanceof GitHubApiError) || error.status !== 404) throw error
-      manifest = { ...EMPTY_MANIFEST, trips: {} }
+      manifest = { ...EMPTY_MANIFEST, trips: {}, days: {} }
     }
 
-    const next: GitHubManifest = { ...manifest, trips: { ...manifest.trips }, updatedAt: new Date().toISOString() }
+    const next: GitHubManifest = {
+      ...manifest,
+      trips: { ...manifest.trips },
+      days: { ...(manifest.days ?? {}) },
+      updatedAt: new Date().toISOString(),
+    }
     const treeEntries: Array<{ path: string; sha: string | null }> = []
     const versions: Record<string, string> = {}
 
-    for (const change of changes) {
+    for (const change of changes.filter(item => item.entityType === 'trip')) {
       const path = `trips/${change.entityId}/trip.json`
       if (change.operation === 'delete') {
         const version = `deleted:${Date.now()}:${change.entityId}`
@@ -110,10 +138,55 @@ export class GitHubSyncProvider implements SyncProvider {
       }
     }
 
+    const dayGroups = new Map<string, LocalChange[]>()
+    for (const change of changes.filter(item => item.entityType === 'day')) {
+      const day = change.payload as SyncedDay | undefined
+      if (!day || day.schemaVersion !== 1 || day.id !== change.entityId || !day.tripId) {
+        throw new Error(`Invalid local day ${change.entityId}`)
+      }
+      const group = dayGroups.get(day.tripId) ?? []
+      group.push(change)
+      dayGroups.set(day.tripId, group)
+    }
+
+    for (const [tripId, group] of dayGroups) {
+      const path = `trips/${tripId}/days.json`
+      let file: GitHubDaysFile
+      try {
+        file = (await this.api.getFile<GitHubDaysFile>(path)).value
+      } catch (error) {
+        if (!(error instanceof GitHubApiError) || error.status !== 404) throw error
+        file = { schemaVersion: 1, tripId, updatedAt: next.updatedAt, days: [] }
+      }
+      if (file.schemaVersion !== 1 || file.tripId !== tripId) throw new Error(`Invalid remote days file ${path}`)
+      const byId = new Map(file.days.map(day => [day.id, day]))
+      for (const change of group) {
+        const day = change.payload as SyncedDay
+        byId.set(day.id, day)
+        const version = `${day.updatedAt}:${day.deletedAt ?? 'active'}`
+        next.days![day.id] = {
+          path,
+          tripId,
+          updatedAt: day.updatedAt,
+          deletedAt: day.deletedAt,
+          contentHash: version,
+        }
+        versions[day.id] = version
+      }
+      const daysFile: GitHubDaysFile = {
+        schemaVersion: 1,
+        tripId,
+        updatedAt: next.updatedAt,
+        days: [...byId.values()].sort((a, b) => a.dayNumber - b.dayNumber || a.id.localeCompare(b.id)),
+      }
+      const blob = await this.api.createBlob(daysFile)
+      treeEntries.push({ path, sha: blob.sha })
+    }
+
     const manifestBlob = await this.api.createBlob(next)
     treeEntries.push({ path: 'manifest.json', sha: manifestBlob.sha })
     const tree = await this.api.createTree(commit.tree.sha, treeEntries)
-    const created = await this.api.createCommit('Sync Travel PWA trips', tree.sha, head)
+    const created = await this.api.createCommit('Sync Travel PWA data', tree.sha, head)
     try {
       await this.api.updateRef(created.sha)
     } catch (error) {

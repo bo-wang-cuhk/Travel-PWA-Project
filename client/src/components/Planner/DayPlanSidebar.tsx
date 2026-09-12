@@ -7,7 +7,8 @@ import { avatarSrc } from '../../utils/avatarSrc'
 import { safeHttpUrl } from '../../utils/safeUrl'
 import { ChevronDown, ChevronRight, ChevronUp, Compass, Navigation, RotateCcw, ExternalLink, Clock, Pencil, GripVertical, Ticket, Plus, FileText, Trash2, Car, Lock, Hotel, Footprints, Route as RouteIcon, Bookmark, StickyNote, TramFront, Zap } from 'lucide-react'
 import { type PickedPlace } from './TransitSearchPanel'
-import { assignmentsApi, reservationsApi, daysApi } from '../../api/client'
+import { assignmentsApi, reservationsApi } from '../../api/client'
+import { dayRepo } from '../../repo/dayRepo'
 import { calculateRouteWithLegs, optimizeRoute, generateGoogleMapsUrl, generateCoMapsUrl, type NamedWaypoint } from '../Map/RouteCalculator'
 import GoogleMapsIcon from '../shared/GoogleMapsIcon'
 import PlaceAvatar from '../shared/PlaceAvatar'
@@ -1381,7 +1382,7 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
   const setDayDefaultMode = (dayId: number, mode: string) => {
     useTripStore.setState(state => ({ days: state.days.map(d => (d.id === dayId ? { ...d, default_transport_mode: mode } : d)) }))
     onSetRouteProfile?.(mode)
-    daysApi.updateTransport(tripId, dayId, mode).catch((err: unknown) => {
+    dayRepo.updateTransport(tripId, dayId, mode).catch((err: unknown) => {
       toast.error(err instanceof Error ? err.message : t('common.unknownError'))
       tripActions.refreshDays(tripId)
     })

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SyncedTrip } from '../../../domain/tripSyncModel'
-import type { GitHubManifest } from './githubTypes'
+import type { SyncedDay } from '../../../domain/daySyncModel'
+import { EMPTY_MANIFEST, type GitHubManifest } from './githubTypes'
 import { GitHubSyncProvider, RemoteAdvancedError } from './GitHubSyncProvider'
 
 const config = { owner: 'me', repository: 'travel-data', branch: 'main', enabled: true }
@@ -17,6 +18,19 @@ const trip: SyncedTrip = {
   reminderDays: 3,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
+  deletedAt: null,
+}
+const day: SyncedDay = {
+  schemaVersion: 1,
+  id: '22222222-2222-4222-8222-222222222222',
+  tripId: trip.id,
+  dayNumber: 1,
+  date: '2026-01-02',
+  title: 'Arrival',
+  notes: null,
+  defaultTransportMode: 'walking',
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-02T00:00:00.000Z',
   deletedAt: null,
 }
 
@@ -115,5 +129,58 @@ describe('GitHubSyncProvider', () => {
     const provider = new GitHubSyncProvider(config, 'secret')
     await provider.connect()
     await expect(provider.push([{ entityType: 'trip', entityId: trip.id, operation: 'upsert', payload: trip }], 'old-head')).rejects.toBeInstanceOf(RemoteAdvancedError)
+  })
+
+  it('pulls a grouped days.json after the parent Trip change', async () => {
+    const path = `trips/${trip.id}/days.json`
+    const manifest: GitHubManifest = {
+      schemaVersion: 1,
+      updatedAt: day.updatedAt,
+      trips: { [trip.id]: { path: `trips/${trip.id}/trip.json`, updatedAt: trip.updatedAt, deletedAt: null, contentHash: 'trip-v1' } },
+      days: { [day.id]: { path, tripId: trip.id, updatedAt: day.updatedAt, deletedAt: null, contentHash: 'day-v1' } },
+    }
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async input => {
+      const url = String(input)
+      if (url.endsWith('/repos/me/travel-data')) return response({ permissions: { push: true } })
+      if (url.includes('/git/ref/heads/main')) return response({ object: { sha: 'head-days' } })
+      if (url.includes('/contents/manifest.json')) return response(file(manifest))
+      if (url.includes(`/contents/trips/${trip.id}/trip.json`)) return response(file(trip))
+      if (url.includes(`/contents/${path}`)) return response(file({ schemaVersion: 1, tripId: trip.id, updatedAt: day.updatedAt, days: [day] }))
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const provider = new GitHubSyncProvider(config, 'secret')
+    await provider.connect()
+
+    const result = await provider.pull()
+    expect(result.changes.map(change => change.entityType)).toEqual(['trip', 'day'])
+    expect(result.changes[1]).toMatchObject({ entityId: day.id, remoteVersion: 'day-v1', payload: day })
+  })
+
+  it('patches a Trip-scoped days.json and commits it with the manifest', async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = []
+    let blob = 0
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init = {}) => {
+      const url = String(input)
+      requests.push({ url, init })
+      if (url.endsWith('/repos/me/travel-data')) return response({ permissions: { push: true } })
+      if (url.includes('/git/ref/heads/main')) return response({ object: { sha: 'head-1' } })
+      if (url.includes('/git/commits/head-1')) return response({ tree: { sha: 'tree-1' } })
+      if (url.includes('/contents/manifest.json')) return response(file({ ...EMPTY_MANIFEST }))
+      if (url.includes(`/contents/trips/${trip.id}/days.json`)) return response({ message: 'Not Found' }, 404)
+      if (url.endsWith('/git/blobs')) return response({ sha: `blob-${++blob}` })
+      if (url.endsWith('/git/trees')) return response({ sha: 'tree-2' })
+      if (url.endsWith('/git/commits')) return response({ sha: 'commit-2' })
+      if (url.includes('/git/refs/heads/main')) return response({})
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const provider = new GitHubSyncProvider(config, 'secret')
+    await provider.connect()
+    const result = await provider.push([{ entityType: 'day', entityId: day.id, operation: 'upsert', payload: day }], 'head-1')
+
+    expect(result.versions[day.id]).toBe(`${day.updatedAt}:active`)
+    const treeRequest = requests.find(request => request.url.endsWith('/git/trees'))!
+    expect(JSON.parse(String(treeRequest.init.body)).tree.map((entry: { path: string }) => entry.path)).toEqual([
+      `trips/${trip.id}/days.json`, 'manifest.json',
+    ])
   })
 })

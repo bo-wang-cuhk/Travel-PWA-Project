@@ -55,6 +55,10 @@ vi.mock('../../api/client', async (importOriginal) => {
   }
 })
 
+vi.mock('../../repo/dayRepo', () => ({
+  dayRepo: { updateTransport: vi.fn().mockResolvedValue({ day: {} }) },
+}))
+
 vi.mock('../PDF/TripPDF', () => ({ downloadTripPDF: vi.fn().mockResolvedValue(undefined) }))
 
 vi.mock('../Map/RouteCalculator', () => ({
@@ -3748,7 +3752,7 @@ describe('DayPlanSidebar', () => {
 
   it('FE-PLANNER-DAYPLAN-169: picking a whole-day travel mode persists it and redraws the map', async () => {
     const user = userEvent.setup()
-    const { daysApi } = await import('../../api/client')
+    const { dayRepo } = await import('../../repo/dayRepo')
     const day = buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' })
     const assignments = {
       '10': [
@@ -3761,14 +3765,14 @@ describe('DayPlanSidebar', () => {
     render(<DayPlanSidebar {...makeDefaultProps({ days: [day], assignments, selectedDayId: 10, onSetRouteProfile })} />)
     await user.click(screen.getByRole('button', { name: 'Walking' }))
     expect(onSetRouteProfile).toHaveBeenCalledWith('walking')
-    expect(vi.mocked(daysApi.updateTransport)).toHaveBeenCalledWith(1, 10, 'walking')
+    expect(vi.mocked(dayRepo.updateTransport)).toHaveBeenCalledWith(1, 10, 'walking')
     expect(useTripStore.getState().days[0].default_transport_mode).toBe('walking')
   })
 
   it('FE-PLANNER-DAYPLAN-170: a failing day-mode save is reported and the days are refetched', async () => {
     const user = userEvent.setup()
-    const { daysApi } = await import('../../api/client')
-    vi.mocked(daysApi.updateTransport).mockRejectedValueOnce(new Error('offline'))
+    const { dayRepo } = await import('../../repo/dayRepo')
+    vi.mocked(dayRepo.updateTransport).mockRejectedValueOnce(new Error('offline'))
     const refreshDays = vi.fn(async () => undefined)
     stubTripActions({ refreshDays })
     const day = buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' })

@@ -1,4 +1,4 @@
-// FE-REPO-TRIP-001 to FE-REPO-TRIP-010
+// FE-REPO-TRIP-001 to FE-REPO-TRIP-012
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import 'fake-indexeddb/auto'
 import { offlineDb, clearAll } from '../db/offlineDb'
@@ -113,5 +113,28 @@ describe('tripRepo local IndexedDB data source', () => {
     await offlineDb.trips.clear()
     await ensureDevelopmentSeed()
     expect(await offlineDb.trips.count()).toBe(0)
+  })
+
+  it('FE-REPO-TRIP-011: creating a dated Trip creates its local Day grid atomically', async () => {
+    const { trip } = await tripRepo.create({
+      title: 'Taiwan', start_date: '2027-03-01', end_date: '2027-03-03', currency: 'TWD',
+    })
+
+    const days = await offlineDb.days.where('trip_id').equals(trip.id).sortBy('day_number')
+    expect(days.map(day => day.date)).toEqual(['2027-03-01', '2027-03-02', '2027-03-03'])
+    expect(days.every(day => day.trip_sync_id === trip.sync_id && Boolean(day.sync_id))).toBe(true)
+    expect(await offlineDb.syncOutbox.filter(row => row.entityType === 'day').count()).toBe(3)
+  })
+
+  it('FE-REPO-TRIP-012: changing the date range re-pins Days and tombstones removed slots', async () => {
+    const { trip } = await tripRepo.create({
+      title: 'Taiwan', start_date: '2027-03-01', end_date: '2027-03-03', currency: 'TWD',
+    })
+    await tripRepo.update(trip.id, { start_date: '2027-04-10', end_date: '2027-04-11', date_shift_mode: 'shift_all' })
+
+    const all = await offlineDb.days.where('trip_id').equals(trip.id).sortBy('day_number')
+    expect(all.filter(day => !day.deleted_at).map(day => day.date)).toEqual(['2027-04-10', '2027-04-11'])
+    expect(all.filter(day => day.deleted_at)).toHaveLength(1)
+    expect((await offlineDb.trips.get(trip.id))?.day_count).toBe(2)
   })
 })

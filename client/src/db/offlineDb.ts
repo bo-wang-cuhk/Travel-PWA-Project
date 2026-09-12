@@ -1,6 +1,7 @@
 import Dexie, { type Table } from 'dexie';
 import type { Trip, Day, Place, PackingItem, TodoItem, BudgetItem, Reservation, TripFile, Accommodation, TripMember, Tag, Category } from '../types';
 import type { LocalTripRecord, StoredTripRecord } from '../domain/tripSyncModel';
+import type { LocalDayRecord, StoredDayRecord } from '../domain/daySyncModel';
 import type {
   EntitySyncMetaRecord,
   SyncConflictRecord,
@@ -142,7 +143,7 @@ function initialDbName(): string {
 
 class TrekOfflineDb extends Dexie {
   trips!: Table<StoredTripRecord, number>;
-  days!: Table<Day, number>;
+  days!: Table<StoredDayRecord, number>;
   places!: Table<Place, number>;
   packingItems!: Table<PackingItem, number>;
   todoItems!: Table<TodoItem, number>;
@@ -251,6 +252,44 @@ class TrekOfflineDb extends Dexie {
         lastError: null,
       })));
     });
+
+    // v7: local-first Day identity and parent UUID. Existing numeric ids stay
+    // as compatibility keys until all itinerary children have migrated.
+    this.version(7).stores({
+      days: 'id, &sync_id, trip_id, trip_sync_id, [trip_sync_id+day_number], deleted_at, updated_at',
+    }).upgrade(async tx => {
+      const now = new Date().toISOString();
+      const trips = await tx.table('trips').toArray() as LocalTripRecord[];
+      const tripSyncIds = new Map(trips.map(trip => [trip.id, trip.sync_id]));
+      await tx.table('days').toCollection().modify((row: Partial<LocalDayRecord>) => {
+        if (!row.sync_id) row.sync_id = randomId();
+        if (!row.trip_sync_id) row.trip_sync_id = tripSyncIds.get(Number(row.trip_id)) || `orphan:${row.trip_id}`;
+        if (!row.created_at) row.created_at = now;
+        if (!row.updated_at) row.updated_at = row.created_at;
+        if (row.deleted_at === undefined) row.deleted_at = null;
+      });
+      const days = await tx.table('days').toArray() as LocalDayRecord[];
+      const syncableDays = days.filter(day => !day.trip_sync_id.startsWith('orphan:'));
+      await tx.table('syncOutbox').bulkPut(syncableDays.map(day => ({
+        key: `day:${day.sync_id}`,
+        entityType: 'day',
+        entityId: day.sync_id,
+        operation: day.deleted_at ? 'delete' : 'upsert',
+        changedAt: Date.parse(day.updated_at) || Date.now(),
+        status: 'pending',
+        attempts: 0,
+        lastError: null,
+      })));
+      await tx.table('entitySyncMeta').bulkPut(days.map(day => ({
+        key: `day:${day.sync_id}`,
+        entityType: 'day',
+        entityId: day.sync_id,
+        status: day.trip_sync_id.startsWith('orphan:') ? 'error' : 'pending',
+        remoteVersion: null,
+        lastSyncedAt: null,
+        lastError: day.trip_sync_id.startsWith('orphan:') ? 'Parent Trip was not found during migration' : null,
+      })));
+    });
   }
 }
 
@@ -326,7 +365,23 @@ export async function upsertTrip(trip: Trip | LocalTripRecord): Promise<void> {
 }
 
 export async function upsertDays(days: Day[]): Promise<void> {
-  await offlineDb.days.bulkPut(days);
+  for (const day of days) {
+    const incoming = day as Day & { created_at?: string; updated_at?: string };
+    const [existing, trip] = await Promise.all([
+      offlineDb.days.get(day.id),
+      offlineDb.trips.get(day.trip_id),
+    ]);
+    const now = new Date().toISOString();
+    await offlineDb.days.put({
+      ...existing,
+      ...day,
+      sync_id: existing?.sync_id || randomId(),
+      trip_sync_id: existing?.trip_sync_id || trip?.sync_id || `orphan:${day.trip_id}`,
+      created_at: existing?.created_at || incoming.created_at || now,
+      updated_at: incoming.updated_at || existing?.updated_at || incoming.created_at || now,
+      deleted_at: existing?.deleted_at ?? null,
+    });
+  }
 }
 
 export async function upsertPlaces(places: Place[]): Promise<void> {
@@ -475,7 +530,6 @@ export async function clearTripData(tripId: number): Promise<void> {
   await offlineDb.transaction(
     'rw',
     [
-      offlineDb.days,
       offlineDb.places,
       offlineDb.packingItems,
       offlineDb.todoItems,
@@ -489,7 +543,8 @@ export async function clearTripData(tripId: number): Promise<void> {
       offlineDb.blobCache,
     ],
     async () => {
-      await offlineDb.days.where('trip_id').equals(tripId).delete();
+      // Trip and Day are now working-database tables, not disposable download
+      // caches. Clearing offline extras must never erase user-authored data.
       await offlineDb.places.where('trip_id').equals(tripId).delete();
       await offlineDb.packingItems.where('trip_id').equals(tripId).delete();
       await offlineDb.todoItems.where('trip_id').equals(tripId).delete();
@@ -504,8 +559,6 @@ export async function clearTripData(tripId: number): Promise<void> {
       await offlineDb.blobCache.where('tripId').equals(tripId).delete();
     },
   );
-  // Remove the trip row itself outside the transaction since it's a separate table
-  await offlineDb.trips.delete(tripId);
 }
 
 /** Wipe the entire offline database (called on logout). */
