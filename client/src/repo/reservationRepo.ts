@@ -1,7 +1,9 @@
 import { offlineDb } from '../db/offlineDb'
 import type { LocalAccommodationRecord } from '../domain/accommodationSyncModel'
 import type { LocalReservationRecord } from '../domain/reservationSyncModel'
+import type { LocalBudgetItemRecord } from '../domain/budgetSyncModel'
 import { accommodationRepo } from './accommodationRepo'
+import { budgetRepo } from './budgetRepo'
 import { markLocalChange } from '../sync/localChangeRepository'
 import type { Reservation } from '../types'
 import { randomId } from '../utils/randomId'
@@ -38,7 +40,7 @@ export const reservationRepo = {
     return { reservations: rows.filter(row => !row.deleted_at) as LocalReservationRecord[] }
   },
   async create(tripId: number | string, data: Partial<Reservation> & { title: string }): Promise<{ reservation: Reservation }> {
-    return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.days, offlineDb.places, offlineDb.assignments, offlineDb.accommodations, offlineDb.reservations, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
+    return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.days, offlineDb.places, offlineDb.assignments, offlineDb.accommodations, offlineDb.reservations, offlineDb.budgetItems, offlineDb.tripMembers, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
       const tripLocalId = Number(tripId), trip = await offlineDb.trips.get(tripLocalId)
       if (!trip?.sync_id || trip.deleted_at) throw new Error('Trip not found in local database')
       let refs = await relations(tripLocalId, data); const now = new Date().toISOString()
@@ -57,8 +59,14 @@ export const reservationRepo = {
         metadata: rawMetadata == null ? null : typeof rawMetadata === 'string' ? rawMetadata : JSON.stringify(rawMetadata),
         status: data.status ?? 'pending', type: data.type ?? 'other', created_at: now, updated_at: now, deleted_at: null,
       }
+      const createBudget = (data as Record<string, unknown>).create_budget_entry
       delete (row as unknown as Record<string, unknown>).create_accommodation; delete (row as unknown as Record<string, unknown>).create_budget_entry
       await offlineDb.reservations.add(row); await markLocalChange('reservation', row.sync_id, 'upsert')
+      if (createBudget && typeof createBudget === 'object') {
+        const values = createBudget as { total_price?: number; category?: string }
+        await budgetRepo.create(tripId, { name: row.title, reservation_id: row.id,
+          total_price: values.total_price ?? 0, category: values.category ?? 'other' })
+      }
       return { reservation: row }
     })
   },
@@ -80,9 +88,14 @@ export const reservationRepo = {
     const row = await offlineDb.reservations.get(id) as LocalReservationRecord | undefined
     if (!row || row.deleted_at || row.trip_id !== Number(tripId)) throw new Error('Reservation not found in local database')
     const now = new Date().toISOString()
-    await offlineDb.transaction('rw', [offlineDb.accommodations, offlineDb.reservations, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
+    await offlineDb.transaction('rw', [offlineDb.accommodations, offlineDb.reservations, offlineDb.budgetItems, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
       await offlineDb.reservations.put({ ...row, deleted_at: now, updated_at: now })
       await markLocalChange('reservation', row.sync_id, 'delete')
+      const budgetRows = await offlineDb.budgetItems.where('trip_id').equals(row.trip_id).toArray() as LocalBudgetItemRecord[]
+      for (const budget of budgetRows.filter(item => !item.deleted_at && item.reservation_id === row.id)) {
+        await offlineDb.budgetItems.put({ ...budget, deleted_at: now, updated_at: now })
+        await markLocalChange('budgetItem', budget.sync_id, 'delete')
+      }
       if (row.accommodation_id != null) {
         const accommodation = await offlineDb.accommodations.get(Number(row.accommodation_id)) as LocalAccommodationRecord | undefined
         if (accommodation && !accommodation.deleted_at && accommodation.trip_id === row.trip_id) {

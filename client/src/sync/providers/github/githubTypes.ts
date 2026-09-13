@@ -27,6 +27,11 @@ export interface GitHubManifestReservation extends GitHubManifestDay {
   accommodationId: string | null
 }
 
+export interface GitHubManifestBudgetItem extends GitHubManifestDay {
+  reservationId: string | null
+  placeId: string | null
+}
+
 export interface GitHubDaysFile {
   schemaVersion: 1
   tripId: string
@@ -62,6 +67,13 @@ export interface GitHubReservationsFile {
   reservations: import('../../../domain/reservationSyncModel').SyncedReservation[]
 }
 
+export interface GitHubBudgetItemsFile {
+  schemaVersion: 1
+  tripId: string
+  updatedAt: string
+  budgetItems: import('../../../domain/budgetSyncModel').SyncedBudgetItem[]
+}
+
 export interface GitHubManifest {
   schemaVersion: 1
   updatedAt: string
@@ -72,6 +84,7 @@ export interface GitHubManifest {
   assignments?: Record<string, GitHubManifestAssignment>
   accommodations?: Record<string, GitHubManifestAccommodation>
   reservations?: Record<string, GitHubManifestReservation>
+  budgetItems?: Record<string, GitHubManifestBudgetItem>
 }
 
 export const EMPTY_MANIFEST: GitHubManifest = {
@@ -83,4 +96,5 @@ export const EMPTY_MANIFEST: GitHubManifest = {
   assignments: {},
   accommodations: {},
   reservations: {},
+  budgetItems: {},
 }

@@ -2,7 +2,7 @@ import type { StoreApi } from 'zustand'
 import type { TrekWsTripEventName } from '@trek/shared'
 import type { TripStoreState } from '../tripStore'
 import type { Assignment, Place, Day, DayNote, PackingItem, TodoItem, BudgetItem, BudgetItemMember, Reservation, Trip, TripFile, WebSocketEvent } from '../../types'
-import { offlineDb, upsertAssignmentsFromDays, upsertDays, upsertPlaces, upsertReservations } from '../../db/offlineDb'
+import { offlineDb, upsertAssignmentsFromDays, upsertBudgetItems, upsertDays, upsertPlaces, upsertReservations } from '../../db/offlineDb'
 import { useAuthStore } from '../authStore'
 import { mergeAssignmentPlace } from './placesSlice'
 
@@ -58,12 +58,12 @@ const putTodoItem: DexieWriter = async payload => {
   await offlineDb.todoItems.put(payload.item as TodoItem)
 }
 const putBudgetItem: DexieWriter = async payload => {
-  await offlineDb.budgetItems.put(payload.item as BudgetItem)
+  await upsertBudgetItems([payload.item as BudgetItem])
 }
 // Partial update — read the canonical item from the updated Zustand state.
 const putCanonicalBudgetItem: DexieWriter = async (payload, state) => {
   const item = state.budgetItems.find(i => i.id === (payload.itemId as number))
-  if (item) await offlineDb.budgetItems.put(item)
+  if (item) await upsertBudgetItems([item])
 }
 const putReservation: DexieWriter = async payload => {
   // The same empty ping the appliers above handle; without this the write
@@ -134,12 +134,16 @@ export const DEXIE_WRITERS: Partial<Record<TrekWsTripEventName, DexieWriter>> = 
   'budget:created': putBudgetItem,
   'budget:updated': putBudgetItem,
   'budget:deleted': async payload => {
-    await offlineDb.budgetItems.delete(payload.itemId as number)
+    const current = await offlineDb.budgetItems.get(payload.itemId as number)
+    if (current) {
+      const now = new Date().toISOString()
+      await offlineDb.budgetItems.put({ ...current, deleted_at: now, updated_at: now })
+    }
   },
   'budget:members-updated': putCanonicalBudgetItem,
   'budget:member-paid-updated': putCanonicalBudgetItem,
   'budget:reordered': async (_payload, state) => {
-    await offlineDb.budgetItems.bulkPut(state.budgetItems)
+    await upsertBudgetItems(state.budgetItems)
   },
 
   // ── Reservations ─────────────────────────────────────────────────────────

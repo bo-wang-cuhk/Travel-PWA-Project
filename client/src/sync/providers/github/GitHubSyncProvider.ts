@@ -3,10 +3,11 @@ import type { SyncedPlace } from '../../../domain/placeSyncModel'
 import type { SyncedAssignment } from '../../../domain/assignmentSyncModel'
 import type { SyncedAccommodation } from '../../../domain/accommodationSyncModel'
 import type { SyncedReservation } from '../../../domain/reservationSyncModel'
+import type { SyncedBudgetItem } from '../../../domain/budgetSyncModel'
 import type { SyncedTrip } from '../../../domain/tripSyncModel'
 import type { GitHubSyncPublicConfig, LocalChange, ProviderStatus, PushResult, RemoteChanges, SyncProvider } from '../../types'
 import { GitHubApi, GitHubApiError } from './githubApi'
-import { EMPTY_MANIFEST, type GitHubAccommodationsFile, type GitHubAssignmentsFile, type GitHubDaysFile, type GitHubManifest, type GitHubPlacesFile, type GitHubReservationsFile } from './githubTypes'
+import { EMPTY_MANIFEST, type GitHubAccommodationsFile, type GitHubAssignmentsFile, type GitHubBudgetItemsFile, type GitHubDaysFile, type GitHubManifest, type GitHubPlacesFile, type GitHubReservationsFile } from './githubTypes'
 
 export class RemoteAdvancedError extends Error {
   constructor() {
@@ -149,8 +150,16 @@ export class GitHubSyncProvider implements SyncProvider {
       if (file.schemaVersion !== 1 || file.tripId !== entry.tripId || !payload) throw new Error(`Invalid remote reservation ${entityId}`)
       return { entityType: 'reservation' as const, entityId, operation: entry.deletedAt ? 'delete' as const : 'upsert' as const, remoteVersion: entry.contentHash, payload }
     }))
+    const budgetFiles = new Map<string, Promise<GitHubBudgetItemsFile>>()
+    const budgetChanges = await Promise.all(Object.entries(manifest.budgetItems ?? {}).filter(([, entry]) => !manifest.trips[entry.tripId]?.deletedAt).map(async ([entityId, entry]) => {
+      let promise = budgetFiles.get(entry.path)
+      if (!promise) { promise = this.api.getFile<GitHubBudgetItemsFile>(entry.path).then(result => result.value); budgetFiles.set(entry.path, promise) }
+      const file = await promise, payload = file.budgetItems.find(item => item.id === entityId)
+      if (file.schemaVersion !== 1 || file.tripId !== entry.tripId || !payload) throw new Error(`Invalid remote budget item ${entityId}`)
+      return { entityType: 'budgetItem' as const, entityId, operation: entry.deletedAt ? 'delete' as const : 'upsert' as const, remoteVersion: entry.contentHash, payload }
+    }))
     // Dependency order is reinforced by SyncManager before applying.
-    return { cursor: head, changes: [...tripChanges, ...dayChanges, ...placeChanges, ...assignmentChanges, ...accommodationChanges, ...reservationChanges] }
+    return { cursor: head, changes: [...tripChanges, ...dayChanges, ...placeChanges, ...assignmentChanges, ...accommodationChanges, ...reservationChanges, ...budgetChanges] }
   }
 
   async push(changes: LocalChange[], cursor?: string | null): Promise<PushResult> {
@@ -167,7 +176,7 @@ export class GitHubSyncProvider implements SyncProvider {
     try { manifest = (await this.api.getFile<GitHubManifest>('manifest.json')).value }
     catch (error) {
       if (!(error instanceof GitHubApiError) || error.status !== 404) throw error
-      manifest = { ...EMPTY_MANIFEST, trips: {}, days: {}, places: {}, assignments: {}, accommodations: {}, reservations: {} }
+      manifest = { ...EMPTY_MANIFEST, trips: {}, days: {}, places: {}, assignments: {}, accommodations: {}, reservations: {}, budgetItems: {} }
     }
 
     const next: GitHubManifest = {
@@ -178,6 +187,7 @@ export class GitHubSyncProvider implements SyncProvider {
       assignments: { ...(manifest.assignments ?? {}) },
       accommodations: { ...(manifest.accommodations ?? {}) },
       reservations: { ...(manifest.reservations ?? {}) },
+      budgetItems: { ...(manifest.budgetItems ?? {}) },
       updatedAt: new Date().toISOString(),
     }
     const treeEntries: Array<{ path: string; sha: string | null }> = []
@@ -363,6 +373,32 @@ export class GitHubSyncProvider implements SyncProvider {
       }
       const blob = await this.api.createBlob({ schemaVersion: 1, tripId, updatedAt: next.updatedAt,
         reservations: [...byId.values()].sort((a, b) => (a.reservationTime ?? '').localeCompare(b.reservationTime ?? '') || a.id.localeCompare(b.id)) } satisfies GitHubReservationsFile)
+      treeEntries.push({ path, sha: blob.sha })
+    }
+
+    const budgetGroups = new Map<string, LocalChange[]>()
+    for (const change of changes.filter(item => item.entityType === 'budgetItem')) {
+      const value = change.payload as SyncedBudgetItem | undefined
+      if (!value || value.schemaVersion !== 1 || value.id !== change.entityId || !value.tripId) throw new Error(`Invalid local budget item ${change.entityId}`)
+      const group = budgetGroups.get(value.tripId) ?? []; group.push(change); budgetGroups.set(value.tripId, group)
+    }
+    for (const [tripId, group] of budgetGroups) {
+      const path = `trips/${tripId}/expenses.json`; let file: GitHubBudgetItemsFile
+      try { file = (await this.api.getFile<GitHubBudgetItemsFile>(path)).value } catch (error) {
+        if (!(error instanceof GitHubApiError) || error.status !== 404) throw error
+        file = { schemaVersion: 1, tripId, updatedAt: next.updatedAt, budgetItems: [] }
+      }
+      if (file.schemaVersion !== 1 || file.tripId !== tripId || !Array.isArray(file.budgetItems)) throw new Error(`Invalid remote budget items file ${path}`)
+      const byId = new Map(file.budgetItems.map(item => [item.id, item]))
+      for (const change of group) {
+        const value = change.payload as SyncedBudgetItem; byId.set(value.id, value)
+        const version = `${value.updatedAt}:${value.deletedAt ?? 'active'}`
+        next.budgetItems![value.id] = { path, tripId, reservationId: value.reservationId, placeId: value.placeId,
+          updatedAt: value.updatedAt, deletedAt: value.deletedAt, contentHash: version }
+        versions[value.id] = version
+      }
+      const blob = await this.api.createBlob({ schemaVersion: 1, tripId, updatedAt: next.updatedAt,
+        budgetItems: [...byId.values()].sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id)) } satisfies GitHubBudgetItemsFile)
       treeEntries.push({ path, sha: blob.sha })
     }
 

@@ -1,5 +1,6 @@
 import { offlineDb } from '../db/offlineDb'
 import type { LocalAssignmentRecord } from '../domain/assignmentSyncModel'
+import type { LocalBudgetItemRecord } from '../domain/budgetSyncModel'
 import type { LocalPlaceRecord, StoredPlaceRecord } from '../domain/placeSyncModel'
 import { markLocalChange } from '../sync/localChangeRepository'
 import type { Place } from '../types'
@@ -78,7 +79,7 @@ export const placeRepo = {
     const localTripId = Number(tripId)
     await offlineDb.transaction(
       'rw',
-      [offlineDb.trips, offlineDb.places, offlineDb.assignments, offlineDb.accommodations, offlineDb.reservations, offlineDb.syncOutbox, offlineDb.entitySyncMeta],
+      [offlineDb.trips, offlineDb.places, offlineDb.assignments, offlineDb.accommodations, offlineDb.reservations, offlineDb.budgetItems, offlineDb.syncOutbox, offlineDb.entitySyncMeta],
       async () => {
         const [trip, stored] = await Promise.all([offlineDb.trips.get(localTripId), offlineDb.places.get(Number(id))])
         if (!trip || trip.deleted_at || !trip.sync_id) throw new Error('Trip not found in local database')
@@ -120,6 +121,12 @@ export const placeRepo = {
             ...(linkedStay ? { accommodation_id: null, accommodation_sync_id: null } : {}), updated_at: now }
           await offlineDb.reservations.put(changed)
           if (changed.sync_id) await markLocalChange('reservation', changed.sync_id, 'upsert')
+        }
+        const budgetRows = await offlineDb.budgetItems.where('trip_id').equals(localTripId).toArray() as LocalBudgetItemRecord[]
+        for (const budget of budgetRows.filter(item => !item.deleted_at && item.place_id === place.id)) {
+          const changed = { ...budget, place_id: null, place_sync_id: null, updated_at: now }
+          await offlineDb.budgetItems.put(changed)
+          await markLocalChange('budgetItem', changed.sync_id, 'upsert')
         }
       },
     )

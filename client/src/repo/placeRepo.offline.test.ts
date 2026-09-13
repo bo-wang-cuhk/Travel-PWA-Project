@@ -7,6 +7,7 @@ import { placeRepo } from './placeRepo'
 import { tripRepo } from './tripRepo'
 import { accommodationRepo } from './accommodationRepo'
 import { reservationRepo } from './reservationRepo'
+import { budgetRepo } from './budgetRepo'
 
 beforeEach(async () => { await clearAll() })
 afterEach(() => { vi.restoreAllMocks() })
@@ -72,6 +73,15 @@ describe('placeRepo local IndexedDB data source', () => {
     await placeRepo.delete(tripId, place.id)
     expect((await offlineDb.accommodations.get(accommodation.id))?.deleted_at).toBeTruthy()
     expect(await offlineDb.reservations.get(reservation.id)).toMatchObject({ place_id: null, accommodation_id: null, deleted_at: null })
+  })
+
+  it('FE-REPO-PLACE-005c: deleting a Place keeps its Expense and clears the optional link', async () => {
+    const { tripId } = await seedTrip()
+    const { place } = await placeRepo.create(tripId, { name: 'Cafe' })
+    const { item } = await budgetRepo.create(tripId, { name: 'Coffee', total_price: 5, place_id: place.id })
+    await placeRepo.delete(tripId, place.id)
+    expect(await offlineDb.budgetItems.get(item.id)).toMatchObject({ place_id: null, place_sync_id: null, deleted_at: null })
+    expect(await offlineDb.syncOutbox.get(`budgetItem:${(await offlineDb.budgetItems.get(item.id))!.sync_id}`)).toMatchObject({ operation: 'upsert' })
   })
 
   it('FE-REPO-PLACE-006: bulk update and delete use the same local-first rules', async () => {

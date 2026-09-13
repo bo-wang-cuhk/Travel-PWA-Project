@@ -49,4 +49,13 @@ describe('reservationRepo local-first', () => {
     expect(await offlineDb.accommodations.count()).toBe(1)
     expect(await offlineDb.syncOutbox.get(`reservation:${(await offlineDb.reservations.get(created.reservation.id))!.sync_id}`)).toBeDefined()
   })
+
+  it('creates and later tombstones a linked Expense in the same local workflow', async () => {
+    const created = await reservationRepo.create(-1, { title: 'Dinner', type: 'restaurant', create_budget_entry: { total_price: 45, category: 'food' } } as never)
+    const budget = (await offlineDb.budgetItems.toArray())[0]
+    expect(budget).toMatchObject({ reservation_id: created.reservation.id, name: 'Dinner', total_price: 45, category: 'food', deleted_at: null })
+    await reservationRepo.delete(-1, created.reservation.id)
+    expect((await offlineDb.budgetItems.get(budget.id))?.deleted_at).toBeTruthy()
+    expect(await offlineDb.syncOutbox.get(`budgetItem:${budget.sync_id}`)).toMatchObject({ operation: 'delete' })
+  })
 })

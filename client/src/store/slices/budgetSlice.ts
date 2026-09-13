@@ -1,11 +1,8 @@
-import { budgetApi } from '../../api/client'
 import { budgetRepo } from '../../repo/budgetRepo'
 import type { StoreApi } from 'zustand'
 import type { TripStoreState } from '../tripStore'
 import type { BudgetItem, BudgetItemMember } from '../../types'
 import type { BudgetCreateItemRequest, BudgetUpdateItemRequest } from '@trek/shared'
-import { getApiErrorMessage } from '../../types'
-import { notify } from '../notify'
 
 type SetState = StoreApi<TripStoreState>['setState']
 type GetState = StoreApi<TripStoreState>['getState']
@@ -32,43 +29,27 @@ export const createBudgetSlice = (set: SetState, get: GetState): BudgetSlice => 
   },
 
   addBudgetItem: async (tripId, data) => {
-    try {
-      const result = await budgetApi.create(tripId, data)
-      set(state => ({ budgetItems: [...state.budgetItems, result.item] }))
-      return result.item
-    } catch (err: unknown) {
-      throw new Error(getApiErrorMessage(err, 'Error adding budget item'))
-    }
+    const result = await budgetRepo.create(tripId, data)
+    set(state => ({ budgetItems: [...state.budgetItems, result.item] }))
+    return result.item
   },
 
   updateBudgetItem: async (tripId, id, data) => {
-    try {
-      const result = await budgetApi.update(tripId, id, data)
-      set(state => ({
-        budgetItems: state.budgetItems.map(item => item.id === id ? result.item : item)
-      }))
-      if (result.item.reservation_id && data.total_price !== undefined) {
-        get().loadReservations(tripId)
-      }
-      return result.item
-    } catch (err: unknown) {
-      throw new Error(getApiErrorMessage(err, 'Error updating budget item'))
+    const result = await budgetRepo.update(tripId, id, data)
+    set(state => ({ budgetItems: state.budgetItems.map(item => item.id === id ? result.item : item) }))
+    if (result.item.reservation_id && data.total_price !== undefined) {
+      await get().loadReservations(tripId)
     }
+    return result.item
   },
 
   deleteBudgetItem: async (tripId, id) => {
-    const prev = get().budgetItems
+    await budgetRepo.delete(tripId, id)
     set(state => ({ budgetItems: state.budgetItems.filter(item => item.id !== id) }))
-    try {
-      await budgetApi.delete(tripId, id)
-    } catch (err: unknown) {
-      set({ budgetItems: prev })
-      throw new Error(getApiErrorMessage(err, 'Error deleting budget item'))
-    }
   },
 
   setBudgetItemMembers: async (tripId, itemId, userIds) => {
-    const result = await budgetApi.setMembers(tripId, itemId, userIds);
+    const result = await budgetRepo.setMembers(tripId, itemId, userIds);
     set(state => ({
       budgetItems: state.budgetItems.map(item =>
         item.id === itemId ? { ...item, members: result.members, persons: result.item.persons } : item
@@ -78,77 +59,17 @@ export const createBudgetSlice = (set: SetState, get: GetState): BudgetSlice => 
   },
 
   toggleBudgetMemberPaid: async (tripId, itemId, userId, paid) => {
-    await budgetApi.togglePaid(tripId, itemId, userId, paid);
-    set(state => ({
-      budgetItems: state.budgetItems.map(item =>
-        item.id === itemId
-          // The server persists `paid` as 0/1 and broadcasts the same 0/1 over
-          // WebSocket, so the optimistic write normalises the boolean toggle to
-          // that numeric contract instead of parking a boolean under a cast.
-          ? { ...item, members: (item.members || []).map(m => m.user_id === userId ? { ...m, paid: paid ? 1 : 0 } : m) }
-          : item
-      )
-    }));
+    const result = await budgetRepo.togglePaid(tripId, itemId, userId, paid);
+    set(state => ({ budgetItems: state.budgetItems.map(item => item.id === itemId ? result.item : item) }));
   },
 
   reorderBudgetItems: async (tripId, orderedIds) => {
-    // Optimistic: reorder locally
-    set(state => {
-      const byId = new Map(state.budgetItems.map(i => [i.id, i]))
-      // Drop unknown ids before reindexing, otherwise a stale id leaves a gap
-      // in the local sort_order sequence.
-      const reordered = orderedIds
-        .map(id => byId.get(id))
-        .filter((i): i is BudgetItem => i !== undefined)
-        .map((item, idx): BudgetItem => ({ ...item, sort_order: idx }))
-      // Keep items not in orderedIds at the end
-      const remaining = state.budgetItems.filter(i => !orderedIds.includes(i.id))
-      return { budgetItems: [...reordered, ...remaining] }
-    })
-    try {
-      await budgetApi.reorderItems(tripId, orderedIds)
-    } catch (err: unknown) {
-      // Reload on failure to restore the server's ordering, and tell the user
-      // their reorder didn't stick (the caller fires this without awaiting, so
-      // a failing reload must not escape as an unhandled rejection).
-      try {
-        const data = await budgetApi.list(tripId)
-        set({ budgetItems: data.items })
-      } catch { /* offline too — the next successful load restores the order */ }
-      notify(getApiErrorMessage(err, 'Error reordering budget items'), 'error')
-    }
+    const result = await budgetRepo.reorderItems(tripId, orderedIds)
+    set({ budgetItems: result.items })
   },
 
   reorderBudgetCategories: async (tripId, orderedCategories) => {
-    // Optimistic: reorder items by new category order (Map preserves insertion order for numeric keys)
-    set(state => {
-      const grouped = new Map<string, BudgetItem[]>()
-      for (const item of state.budgetItems) {
-        const cat = item.category || 'Other'
-        if (!grouped.has(cat)) grouped.set(cat, [])
-        grouped.get(cat)!.push(item)
-      }
-      const reordered: BudgetItem[] = []
-      for (const cat of orderedCategories) {
-        const items = grouped.get(cat)
-        if (items) reordered.push(...items)
-      }
-      for (const [cat, items] of grouped) {
-        if (!orderedCategories.includes(cat)) reordered.push(...items)
-      }
-      return { budgetItems: reordered }
-    })
-    try {
-      await budgetApi.reorderCategories(tripId, orderedCategories)
-    } catch (err: unknown) {
-      // Reload on failure to restore the server's ordering, and tell the user
-      // their reorder didn't stick (the caller fires this without awaiting, so
-      // a failing reload must not escape as an unhandled rejection).
-      try {
-        const data = await budgetApi.list(tripId)
-        set({ budgetItems: data.items })
-      } catch { /* offline too — the next successful load restores the order */ }
-      notify(getApiErrorMessage(err, 'Error reordering budget items'), 'error')
-    }
+    const result = await budgetRepo.reorderCategories(tripId, orderedCategories)
+    set({ budgetItems: result.items })
   },
 })

@@ -6,6 +6,7 @@ import type { LocalPlaceRecord, StoredPlaceRecord } from '../domain/placeSyncMod
 import type { LocalAssignmentRecord, StoredAssignmentRecord } from '../domain/assignmentSyncModel';
 import type { LocalAccommodationRecord, StoredAccommodationRecord } from '../domain/accommodationSyncModel';
 import type { LocalReservationRecord, StoredReservationRecord } from '../domain/reservationSyncModel';
+import type { LocalBudgetItemRecord, StoredBudgetItemRecord } from '../domain/budgetSyncModel';
 import type {
   EntitySyncMetaRecord,
   SyncConflictRecord,
@@ -152,7 +153,7 @@ class TrekOfflineDb extends Dexie {
   assignments!: Table<StoredAssignmentRecord, number>;
   packingItems!: Table<PackingItem, number>;
   todoItems!: Table<TodoItem, number>;
-  budgetItems!: Table<BudgetItem, number>;
+  budgetItems!: Table<StoredBudgetItemRecord, number>;
   reservations!: Table<StoredReservationRecord, number>;
   tripFiles!: Table<TripFile, number>;
   accommodations!: Table<StoredAccommodationRecord, number>;
@@ -439,6 +440,47 @@ class TrekOfflineDb extends Dexie {
         lastError: ok ? null : 'Reservation relation was not found during migration',
       })));
     });
+
+    // v10: Expense/Budget items become local-first. User ids remain account
+    // references in embedded member/payer snapshots; domain relationships use
+    // stable UUIDs so the provider format is independent of local numeric ids.
+    this.version(10).stores({
+      budgetItems: 'id, &sync_id, trip_id, trip_sync_id, reservation_sync_id, place_sync_id, deleted_at, updated_at',
+    }).upgrade(async tx => {
+      const now = new Date().toISOString();
+      const [trips, reservations, places] = await Promise.all([
+        tx.table('trips').toArray() as Promise<LocalTripRecord[]>,
+        tx.table('reservations').toArray() as Promise<LocalReservationRecord[]>,
+        tx.table('places').toArray() as Promise<LocalPlaceRecord[]>,
+      ]);
+      const tripIds = new Map(trips.map(row => [row.id, row.sync_id]));
+      const reservationIds = new Map(reservations.map(row => [row.id, row.sync_id]));
+      const placeIds = new Map(places.map(row => [row.id, row.sync_id]));
+      await tx.table('budgetItems').toCollection().modify((row: Partial<LocalBudgetItemRecord>) => {
+        if (!row.sync_id) row.sync_id = randomId();
+        if (!row.trip_sync_id) row.trip_sync_id = tripIds.get(Number(row.trip_id)) || `orphan:${row.trip_id}`;
+        if (row.reservation_sync_id === undefined) row.reservation_sync_id = row.reservation_id == null ? null : reservationIds.get(Number(row.reservation_id)) || `orphan:${row.reservation_id}`;
+        if (row.place_sync_id === undefined) row.place_sync_id = row.place_id == null ? null : placeIds.get(Number(row.place_id)) || `orphan:${row.place_id}`;
+        if (!row.created_at) row.created_at = now;
+        if (!row.updated_at) row.updated_at = row.created_at;
+        if (row.deleted_at === undefined) row.deleted_at = null;
+        if (!row.members) row.members = [];
+        if (!row.payers) row.payers = [];
+      });
+      const rows = await tx.table('budgetItems').toArray() as LocalBudgetItemRecord[];
+      const syncable = (row: LocalBudgetItemRecord) => [row.trip_sync_id, row.reservation_sync_id, row.place_sync_id]
+        .every(value => !value?.startsWith('orphan:'));
+      await tx.table('syncOutbox').bulkPut(rows.filter(syncable).map(row => ({
+        key: `budgetItem:${row.sync_id}`, entityType: 'budgetItem', entityId: row.sync_id,
+        operation: row.deleted_at ? 'delete' : 'upsert', changedAt: Date.parse(row.updated_at) || Date.now(),
+        status: 'pending', attempts: 0, lastError: null,
+      })));
+      await tx.table('entitySyncMeta').bulkPut(rows.map(row => ({
+        key: `budgetItem:${row.sync_id}`, entityType: 'budgetItem', entityId: row.sync_id,
+        status: syncable(row) ? 'pending' : 'error', remoteVersion: null, lastSyncedAt: null,
+        lastError: syncable(row) ? null : 'Budget item relation was not found during migration',
+      })));
+    });
   }
 }
 
@@ -590,7 +632,24 @@ export async function upsertTodoItems(items: TodoItem[]): Promise<void> {
 }
 
 export async function upsertBudgetItems(items: BudgetItem[]): Promise<void> {
-  await offlineDb.budgetItems.bulkPut(items);
+  for (const item of items) {
+    const [existing, trip, reservation, place] = await Promise.all([
+      offlineDb.budgetItems.get(item.id), offlineDb.trips.get(item.trip_id),
+      item.reservation_id == null ? undefined : offlineDb.reservations.get(item.reservation_id),
+      item.place_id == null ? undefined : offlineDb.places.get(item.place_id),
+    ]);
+    const now = new Date().toISOString();
+    await offlineDb.budgetItems.put({ ...existing, ...item,
+      sync_id: existing?.sync_id || randomId(),
+      trip_sync_id: existing?.trip_sync_id || trip?.sync_id || `orphan:${item.trip_id}`,
+      reservation_sync_id: item.reservation_id == null ? null : reservation?.sync_id || `orphan:${item.reservation_id}`,
+      place_sync_id: item.place_id == null ? null : place?.sync_id || `orphan:${item.place_id}`,
+      created_at: existing?.created_at || item.created_at || now,
+      updated_at: existing?.updated_at || item.created_at || now,
+      deleted_at: existing?.deleted_at ?? null,
+      members: item.members ?? existing?.members ?? [], payers: item.payers ?? existing?.payers ?? [],
+    });
+  }
 }
 
 export async function upsertReservations(items: Reservation[]): Promise<void> {
@@ -756,7 +815,6 @@ export async function clearTripData(tripId: number): Promise<void> {
     [
       offlineDb.packingItems,
       offlineDb.todoItems,
-      offlineDb.budgetItems,
       offlineDb.tripFiles,
       offlineDb.tripMembers,
       offlineDb.mutationQueue,
@@ -768,7 +826,6 @@ export async function clearTripData(tripId: number): Promise<void> {
       // caches. Clearing offline extras must never erase user-authored data.
       await offlineDb.packingItems.where('trip_id').equals(tripId).delete();
       await offlineDb.todoItems.where('trip_id').equals(tripId).delete();
-      await offlineDb.budgetItems.where('trip_id').equals(tripId).delete();
       await offlineDb.tripFiles.where('trip_id').equals(tripId).delete();
       await offlineDb.tripMembers.where('tripId').equals(tripId).delete();
       // Keep pending/syncing/conflict mutations — only purge dead 'failed' rows.

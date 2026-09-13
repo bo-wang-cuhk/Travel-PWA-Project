@@ -7,6 +7,7 @@ import { placeRepo } from '../repo/placeRepo'
 import { assignmentRepo } from '../repo/assignmentRepo'
 import { accommodationRepo } from '../repo/accommodationRepo'
 import { reservationRepo } from '../repo/reservationRepo'
+import { budgetRepo } from '../repo/budgetRepo'
 import type { LocalChange, ProviderStatus, PushResult, RemoteChanges, SyncEntityType, SyncProvider } from './types'
 import { SyncManager } from './SyncManager'
 
@@ -243,5 +244,41 @@ describe('local-first SyncManager', () => {
     const pulledTrip = (await tripRepo.list()).trips[0]
     expect((await accommodationRepo.list(pulledTrip.id)).accommodations[0]).toMatchObject({ place_name: 'Hotel' })
     expect((await reservationRepo.list(pulledTrip.id)).reservations[0]).toMatchObject({ title: 'Hotel booking' })
+  })
+
+  it('pushes and pulls an Expense after its Trip, Place, and Reservation', async () => {
+    const provider = new MemoryProvider()
+    const { trip } = await tripRepo.create({ title: 'Paris', day_count: 0 })
+    const { place } = await placeRepo.create(trip.id, { name: 'Cafe' })
+    const { reservation } = await reservationRepo.create(trip.id, { title: 'Lunch', type: 'restaurant', place_id: place.id })
+    const { item } = await budgetRepo.create(trip.id, { name: 'Lunch', category: 'food', total_price: 42, place_id: place.id, reservation_id: reservation.id })
+    const syncId = (await offlineDb.budgetItems.get(item.id))!.sync_id!
+
+    await new SyncManager(provider).sync()
+    expect(provider.remote.get(syncId)?.payload).toMatchObject({ tripId: trip.sync_id, placeId: place.sync_id, totalPrice: 42 })
+
+    await clearAll(); await new SyncManager(provider).sync()
+    const pulledTrip = (await tripRepo.list()).trips[0]
+    const pulled = (await budgetRepo.list(pulledTrip.id)).items[0]
+    expect(pulled).toMatchObject({ name: 'Lunch', total_price: 42 })
+    expect((await offlineDb.budgetItems.get(pulled.id))?.reservation_sync_id).toBeTruthy()
+  })
+
+  it('marks concurrent Expense edits as a conflict without overwriting local data', async () => {
+    const provider = new MemoryProvider()
+    const { trip } = await tripRepo.create({ title: 'Berlin', day_count: 0 })
+    const { item } = await budgetRepo.create(trip.id, { name: 'Train', total_price: 10 })
+    const syncId = (await offlineDb.budgetItems.get(item.id))!.sync_id!
+    await new SyncManager(provider).sync()
+    await budgetRepo.update(trip.id, item.id, { total_price: 12 })
+    const remote = provider.remote.get(syncId)!.payload as Record<string, unknown>
+    provider.editRemote(syncId, { ...remote, totalPrice: 15, updatedAt: new Date().toISOString() }, 'budgetItem')
+
+    const result = await new SyncManager(provider).sync()
+    expect(result.conflicts).toBe(1)
+    expect(await offlineDb.syncConflicts.get(`budgetItem:${syncId}`)).toMatchObject({
+      localSnapshot: { totalPrice: 12 }, remoteSnapshot: { totalPrice: 15 },
+    })
+    expect((await budgetRepo.list(trip.id)).items[0].total_price).toBe(12)
   })
 })
