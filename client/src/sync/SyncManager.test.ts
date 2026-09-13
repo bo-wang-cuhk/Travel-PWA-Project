@@ -8,6 +8,9 @@ import { assignmentRepo } from '../repo/assignmentRepo'
 import { accommodationRepo } from '../repo/accommodationRepo'
 import { reservationRepo } from '../repo/reservationRepo'
 import { budgetRepo } from '../repo/budgetRepo'
+import { todoRepo } from '../repo/todoRepo'
+import { packingRepo } from '../repo/packingRepo'
+import { vacayRepo } from '../repo/vacayRepo'
 import type { LocalChange, ProviderStatus, PushResult, RemoteChanges, SyncEntityType, SyncProvider } from './types'
 import { SyncManager } from './SyncManager'
 
@@ -280,5 +283,39 @@ describe('local-first SyncManager', () => {
       localSnapshot: { totalPrice: 12 }, remoteSnapshot: { totalPrice: 15 },
     })
     expect((await budgetRepo.list(trip.id)).items[0].total_price).toBe(12)
+  })
+
+  it('pushes and pulls Todo, Packing and the personal Vacay calendar', async () => {
+    const provider = new MemoryProvider(); const { trip } = await tripRepo.create({ title: 'Local-first', day_count: 0 })
+    const todo = await todoRepo.create(trip.id, { name: 'Check passport' })
+    const bag = await packingRepo.createBag(trip.id, { name: 'Carry-on' })
+    const item = await packingRepo.create(trip.id, { name: 'Passport', bag_id: bag.bag.id })
+    await packingRepo.saveAsTemplate(trip.id, 'Essentials')
+    await vacayRepo.toggleEntry('2026-06-20', 1)
+    await new SyncManager(provider).sync()
+    const todoId = (await offlineDb.todoItems.get(todo.item.id))!.sync_id!
+    const itemId = (await offlineDb.packingItems.get(item.item.id))!.sync_id!
+    expect(provider.remote.get(todoId)?.payload).toMatchObject({ name: 'Check passport', tripId: trip.sync_id })
+    expect(provider.remote.get(itemId)?.payload).toMatchObject({ name: 'Passport', bagId: (await offlineDb.packingBags.get(bag.bag.id))!.sync_id })
+    expect(provider.remote.get('personal-vacay')?.payload).toMatchObject({ entries: [{ date: '2026-06-20' }] })
+    expect(provider.remote.get('personal-packing')?.payload).toMatchObject({ templates: [{ name: 'Essentials' }] })
+
+    await clearAll(); await new SyncManager(provider).sync()
+    const pulledTrip = (await tripRepo.list()).trips[0]
+    expect((await todoRepo.list(pulledTrip.id)).items[0].name).toBe('Check passport')
+    expect((await packingRepo.listBags(pulledTrip.id)).bags[0].name).toBe('Carry-on')
+    expect((await packingRepo.list(pulledTrip.id)).items[0].bag_id).toBeLessThan(0)
+    expect((await packingRepo.listTemplates()).templates[0].name).toBe('Essentials')
+    expect((await vacayRepo.getEntries(2026)).entries[0].date).toBe('2026-06-20')
+  })
+
+  it('detects a concurrent Vacay edit without overwriting local dates', async () => {
+    const provider = new MemoryProvider(); await vacayRepo.toggleEntry('2026-01-01', 1); await new SyncManager(provider).sync()
+    await vacayRepo.toggleEntry('2026-01-02', 1)
+    const remote = provider.remote.get('personal-vacay')!.payload as Record<string, unknown>
+    provider.editRemote('personal-vacay', { ...remote, entries: [{ date: '2026-01-03', user_id: 1 }], updatedAt: new Date().toISOString() }, 'vacay')
+    const result = await new SyncManager(provider).sync()
+    expect(result.conflicts).toBe(1); expect((await vacayRepo.getEntries(2026)).entries.map(v => v.date)).toContain('2026-01-02')
+    expect(await offlineDb.syncConflicts.get('vacay:personal-vacay')).toBeDefined()
   })
 })

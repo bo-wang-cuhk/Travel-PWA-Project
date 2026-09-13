@@ -1,55 +1,33 @@
-// FE-REPO-TODO-001 to FE-REPO-TODO-004
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import 'fake-indexeddb/auto'
-import { http, HttpResponse } from 'msw'
-import { server } from '../../tests/helpers/msw/server'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { clearAll, offlineDb } from '../db/offlineDb'
 import { todoRepo } from './todoRepo'
-import { offlineDb, clearAll } from '../db/offlineDb'
-import { buildTodoItem } from '../../tests/helpers/factories'
-
-function setOnline(v: boolean): void {
-  Object.defineProperty(navigator, 'onLine', { value: v, writable: true, configurable: true })
-}
 
 beforeEach(async () => {
   await clearAll()
-  setOnline(true)
+  await offlineDb.trips.put({ id: -1, sync_id: 'trip-a', name: 'Trip', start_date: '2026-01-01', end_date: '2026-01-02', created_at: 'x', updated_at: 'x', deleted_at: null } as never)
 })
 
-afterEach(() => {
-  vi.restoreAllMocks()
-})
-
-describe('todoRepo.list', () => {
-  it('FE-REPO-TODO-001: online — returns REST items and caches them', async () => {
-    const item = buildTodoItem({ id: 51, trip_id: 9, name: 'Book train' })
-    server.use(http.get('/api/trips/9/todo', () => HttpResponse.json({ items: [item] })))
-
-    const result = await todoRepo.list(9)
-    expect(result.items.map(i => i.name)).toEqual(['Book train'])
-
-    await new Promise(r => setTimeout(r, 0))
-    expect((await offlineDb.todoItems.get(51))!.name).toBe('Book train')
+describe('todoRepo local-first', () => {
+  it('creates, updates and toggles without network access', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    const created = await todoRepo.create(-1, { name: 'Book train', due_date: '2026-01-01' })
+    await todoRepo.update(-1, created.item.id, { checked: true, priority: 2 })
+    expect((await todoRepo.list(-1)).items[0]).toMatchObject({ name: 'Book train', checked: 1, priority: 2 })
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  it('FE-REPO-TODO-002: offline — returns only this trip\'s cached items', async () => {
-    await offlineDb.todoItems.bulkPut([
-      buildTodoItem({ id: 52, trip_id: 9 }),
-      buildTodoItem({ id: 53, trip_id: 10 }),
-    ])
-    setOnline(false)
-
-    const result = await todoRepo.list('9')
-    expect(result.items.map(i => i.id)).toEqual([52])
+  it('persists ordering and queues each changed item', async () => {
+    const first = await todoRepo.create(-1, { name: 'A' }); const second = await todoRepo.create(-1, { name: 'B' })
+    await todoRepo.reorder(-1, [second.item.id, first.item.id])
+    expect((await todoRepo.list(-1)).items.map(v => v.name)).toEqual(['B', 'A'])
+    expect(await offlineDb.syncOutbox.count()).toBe(2)
   })
 
-  it('FE-REPO-TODO-003: offline with an empty cache — returns an empty list', async () => {
-    setOnline(false)
-    expect((await todoRepo.list(404)).items).toEqual([])
-  })
-
-  it('FE-REPO-TODO-004: a 500 is rethrown, not masked by the cache', async () => {
-    server.use(http.get('/api/trips/9/todo', () => HttpResponse.json({ error: 'boom' }, { status: 500 })))
-    await expect(todoRepo.list(9)).rejects.toThrow()
+  it('soft deletes and retains a tombstone for synchronization', async () => {
+    const created = await todoRepo.create(-1, { name: 'A' }); await todoRepo.delete(-1, created.item.id)
+    expect((await todoRepo.list(-1)).items).toEqual([])
+    const row = await offlineDb.todoItems.get(created.item.id)
+    expect(row?.deleted_at).toBeTruthy(); expect((await offlineDb.syncOutbox.get(`todo:${row?.sync_id}`))?.operation).toBe('delete')
   })
 })

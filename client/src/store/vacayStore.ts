@@ -1,21 +1,13 @@
 import { create } from 'zustand'
-import apiClient from '../api/client'
+import { vacayRepo } from '../repo/vacayRepo'
 import { useAuthStore } from './authStore'
-import type { AxiosResponse } from 'axios'
 import type {
   VacayPlan, VacayUser, VacayEntry, VacayStat, HolidaysMap, HolidayInfo, VacayHolidayCalendar,
   VacayShareOutgoing, VacayShareIncoming, SharedVacayCalendar, VacayYearSettings,
 } from '../types'
 import { isSchoolHolidayCountrySupported } from '../vacay/schoolHolidayCountries'
 import { DEFAULT_YEAR_SETTINGS, defaultPeriodYear, inGridWindow, windowCalendarYears } from '../vacay/yearWindow'
-import type {
-  VacaySetColorRequest, VacayInviteRequest, VacayInviteActionRequest,
-  VacayAddYearRequest, VacayToggleEntryRequest, VacayCompanyHolidayRequest,
-  VacayUpdateStatsRequest, VacayShareRequest, VacayShareUpdateRequest,
-  VacayYearSettingsRequest,
-} from '@trek/shared'
-
-const ax = apiClient
+import type { VacayYearSettingsRequest } from '@trek/shared'
 
 interface PendingInvite {
   user_id: number
@@ -94,41 +86,7 @@ interface VacayApi {
   updateYearSettings: (data: VacayYearSettingsRequest) => Promise<{ settings: VacayYearSettings }>
 }
 
-const api: VacayApi = {
-  getPlan: () => ax.get('/addons/vacay/plan').then((r: AxiosResponse) => r.data),
-  updatePlan: (data) => ax.put('/addons/vacay/plan', data).then((r: AxiosResponse) => r.data),
-  updateColor: (color, targetUserId) => ax.put('/addons/vacay/color', { color, target_user_id: targetUserId } satisfies VacaySetColorRequest).then((r: AxiosResponse) => r.data),
-  invite: (userId) => ax.post('/addons/vacay/invite', { user_id: userId } satisfies VacayInviteRequest).then((r: AxiosResponse) => r.data),
-  acceptInvite: (planId) => ax.post('/addons/vacay/invite/accept', { plan_id: planId } satisfies VacayInviteActionRequest).then((r: AxiosResponse) => r.data),
-  declineInvite: (planId) => ax.post('/addons/vacay/invite/decline', { plan_id: planId } satisfies VacayInviteActionRequest).then((r: AxiosResponse) => r.data),
-  cancelInvite: (userId) => ax.post('/addons/vacay/invite/cancel', { user_id: userId }).then((r: AxiosResponse) => r.data),
-  dissolve: () => ax.post('/addons/vacay/dissolve').then((r: AxiosResponse) => r.data),
-  getYears: () => ax.get('/addons/vacay/years').then((r: AxiosResponse) => r.data),
-  addYear: (year) => ax.post('/addons/vacay/years', { year } satisfies VacayAddYearRequest).then((r: AxiosResponse) => r.data),
-  removeYear: (year) => ax.delete(`/addons/vacay/years/${year}`).then((r: AxiosResponse) => r.data),
-  getEntries: (year) => ax.get(`/addons/vacay/entries/${year}`).then((r: AxiosResponse) => r.data),
-  toggleEntry: (date, targetUserId, fraction, kind) => ax.post('/addons/vacay/entries/toggle', { date, target_user_id: targetUserId, fraction, kind } satisfies VacayToggleEntryRequest).then((r: AxiosResponse) => r.data),
-  toggleCompanyHoliday: (date) => ax.post('/addons/vacay/entries/company-holiday', { date } satisfies VacayCompanyHolidayRequest).then((r: AxiosResponse) => r.data),
-  getStats: (year) => ax.get(`/addons/vacay/stats/${year}`).then((r: AxiosResponse) => r.data),
-  updateStats: (year, days, targetUserId) => ax.put(`/addons/vacay/stats/${year}`, { vacation_days: days, target_user_id: targetUserId } satisfies VacayUpdateStatsRequest).then((r: AxiosResponse) => r.data),
-  getHolidays: (year, country) => ax.get(`/addons/vacay/holidays/${year}/${country}`).then((r: AxiosResponse) => r.data),
-  getSchoolHolidays: (year, country, subdivision, group) => {
-    const params = new URLSearchParams()
-    if (group) params.set('group', group)
-    const qs = params.toString()
-    return ax.get(`/addons/vacay/school-holidays/${year}/${country}${subdivision ? `/${subdivision}` : ''}${qs ? `?${qs}` : ''}`).then((r: AxiosResponse) => r.data)
-  },
-  addHolidayCalendar: (data) => ax.post('/addons/vacay/plan/holiday-calendars', data).then((r: AxiosResponse) => r.data),
-  updateHolidayCalendar: (id, data) => ax.put(`/addons/vacay/plan/holiday-calendars/${id}`, data).then((r: AxiosResponse) => r.data),
-  deleteHolidayCalendar: (id) => ax.delete(`/addons/vacay/plan/holiday-calendars/${id}`).then((r: AxiosResponse) => r.data),
-  getShares: () => ax.get('/addons/vacay/shares').then((r: AxiosResponse) => r.data),
-  share: (userId) => ax.post('/addons/vacay/shares', { user_id: userId } satisfies VacayShareRequest).then((r: AxiosResponse) => r.data),
-  removeShare: (shareId) => ax.delete(`/addons/vacay/shares/${shareId}`).then((r: AxiosResponse) => r.data),
-  updateShare: (shareId, hidden) => ax.put(`/addons/vacay/shares/${shareId}`, { hidden } satisfies VacayShareUpdateRequest).then((r: AxiosResponse) => r.data),
-  getSharedCalendars: (year) => ax.get(`/addons/vacay/shares/calendars/${year}`).then((r: AxiosResponse) => r.data),
-  getYearSettings: () => ax.get('/addons/vacay/year-settings').then((r: AxiosResponse) => r.data),
-  updateYearSettings: (data) => ax.put('/addons/vacay/year-settings', data satisfies VacayYearSettingsRequest).then((r: AxiosResponse) => r.data),
-}
+const api: VacayApi = vacayRepo as VacayApi
 
 function pushHolidayMarker(map: HolidaysMap, date: string, marker: HolidayInfo) {
   const existing = map[date]

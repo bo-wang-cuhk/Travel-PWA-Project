@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import type { Trip, Day, Place, PackingItem, TodoItem, BudgetItem, Reservation, TripFile, Accommodation, TripMember, Tag, Category } from '../types';
+import type { Trip, Day, Place, TodoItem, BudgetItem, Reservation, TripFile, Accommodation, TripMember, Tag, Category } from '../types';
 import type { LocalTripRecord, StoredTripRecord } from '../domain/tripSyncModel';
 import type { LocalDayRecord, StoredDayRecord } from '../domain/daySyncModel';
 import type { LocalPlaceRecord, StoredPlaceRecord } from '../domain/placeSyncModel';
@@ -7,6 +7,9 @@ import type { LocalAssignmentRecord, StoredAssignmentRecord } from '../domain/as
 import type { LocalAccommodationRecord, StoredAccommodationRecord } from '../domain/accommodationSyncModel';
 import type { LocalReservationRecord, StoredReservationRecord } from '../domain/reservationSyncModel';
 import type { LocalBudgetItemRecord, StoredBudgetItemRecord } from '../domain/budgetSyncModel';
+import type { LocalTodoRecord, StoredTodoRecord } from '../domain/todoSyncModel';
+import type { LocalPackingConfigRecord, LocalPackingItemRecord, StoredPackingBagRecord, StoredPackingItemRecord } from '../domain/packingSyncModel';
+import type { LocalVacayRecord } from '../domain/vacaySyncModel';
 import type {
   EntitySyncMetaRecord,
   SyncConflictRecord,
@@ -151,8 +154,11 @@ class TrekOfflineDb extends Dexie {
   days!: Table<StoredDayRecord, number>;
   places!: Table<StoredPlaceRecord, number>;
   assignments!: Table<StoredAssignmentRecord, number>;
-  packingItems!: Table<PackingItem, number>;
-  todoItems!: Table<TodoItem, number>;
+  packingItems!: Table<StoredPackingItemRecord, number>;
+  packingBags!: Table<StoredPackingBagRecord, number>;
+  packingConfig!: Table<LocalPackingConfigRecord, string>;
+  todoItems!: Table<StoredTodoRecord, number>;
+  vacayData!: Table<LocalVacayRecord, string>;
   budgetItems!: Table<StoredBudgetItemRecord, number>;
   reservations!: Table<StoredReservationRecord, number>;
   tripFiles!: Table<TripFile, number>;
@@ -481,6 +487,73 @@ class TrekOfflineDb extends Dexie {
         lastError: syncable(row) ? null : 'Budget item relation was not found during migration',
       })));
     });
+
+    // v11: Todo becomes a local-first Trip child with provider-neutral UUIDs.
+    this.version(11).stores({
+      todoItems: 'id, &sync_id, trip_id, trip_sync_id, deleted_at, updated_at',
+    }).upgrade(async tx => {
+      const now = new Date().toISOString();
+      const trips = await tx.table('trips').toArray() as LocalTripRecord[];
+      const tripIds = new Map(trips.map(row => [row.id, row.sync_id]));
+      await tx.table('todoItems').toCollection().modify((row: Partial<LocalTodoRecord>) => {
+        if (!row.sync_id) row.sync_id = randomId();
+        if (!row.trip_sync_id) row.trip_sync_id = tripIds.get(Number(row.trip_id)) || `orphan:${row.trip_id}`;
+        if (!row.created_at) row.created_at = now;
+        if (!row.updated_at) row.updated_at = row.created_at;
+        if (row.deleted_at === undefined) row.deleted_at = null;
+        if (row.assigned_user_name === undefined) row.assigned_user_name = null;
+      });
+      const rows = await tx.table('todoItems').toArray() as LocalTodoRecord[];
+      const valid = (row: LocalTodoRecord) => !row.trip_sync_id.startsWith('orphan:');
+      await tx.table('syncOutbox').bulkPut(rows.filter(valid).map(row => ({
+        key: `todo:${row.sync_id}`, entityType: 'todo', entityId: row.sync_id,
+        operation: row.deleted_at ? 'delete' : 'upsert', changedAt: Date.parse(row.updated_at) || Date.now(),
+        status: 'pending', attempts: 0, lastError: null,
+      })));
+      await tx.table('entitySyncMeta').bulkPut(rows.map(row => ({
+        key: `todo:${row.sync_id}`, entityType: 'todo', entityId: row.sync_id,
+        status: valid(row) ? 'pending' : 'error', remoteVersion: null, lastSyncedAt: null,
+        lastError: valid(row) ? null : 'Todo parent trip was not found during migration',
+      })));
+    });
+
+    // v12: Packing items leave the legacy REST replay queue; bags receive their
+    // own local table so item-to-bag relationships can use stable UUIDs.
+    this.version(12).stores({
+      packingItems: 'id, &sync_id, trip_id, trip_sync_id, bag_sync_id, deleted_at, updated_at',
+      packingBags: 'id, &sync_id, trip_id, trip_sync_id, deleted_at, updated_at',
+      packingConfig: 'id, updated_at',
+    }).upgrade(async tx => {
+      const now = new Date().toISOString();
+      const trips = await tx.table('trips').toArray() as LocalTripRecord[];
+      const tripIds = new Map(trips.map(row => [row.id, row.sync_id]));
+      await tx.table('packingItems').toCollection().modify((row: Partial<LocalPackingItemRecord>) => {
+        if (!row.sync_id) row.sync_id = randomId();
+        if (!row.trip_sync_id) row.trip_sync_id = tripIds.get(Number(row.trip_id)) || `orphan:${row.trip_id}`;
+        if (row.bag_sync_id === undefined) row.bag_sync_id = null;
+        if (!row.created_at) row.created_at = now;
+        if (!row.updated_at) row.updated_at = row.created_at;
+        if (row.deleted_at === undefined) row.deleted_at = null;
+      });
+      const rows = await tx.table('packingItems').toArray() as LocalPackingItemRecord[];
+      const valid = (row: LocalPackingItemRecord) => !row.trip_sync_id.startsWith('orphan:');
+      await tx.table('syncOutbox').bulkPut(rows.filter(valid).map(row => ({
+        key: `packingItem:${row.sync_id}`, entityType: 'packingItem', entityId: row.sync_id,
+        operation: row.deleted_at ? 'delete' : 'upsert', changedAt: Date.parse(row.updated_at) || Date.now(),
+        status: 'pending', attempts: 0, lastError: null,
+      })));
+      await tx.table('entitySyncMeta').bulkPut(rows.map(row => ({
+        key: `packingItem:${row.sync_id}`, entityType: 'packingItem', entityId: row.sync_id,
+        status: valid(row) ? 'pending' : 'error', remoteVersion: null, lastSyncedAt: null,
+        lastError: valid(row) ? null : 'Packing item parent trip was not found during migration',
+      })));
+    });
+
+    // v13: the personal Vacay calendar is a small non-Trip aggregate. Public and
+    // school-holiday responses remain replaceable online-service caches.
+    this.version(13).stores({
+      vacayData: 'id, updated_at, deleted_at',
+    });
   }
 }
 
@@ -623,12 +696,30 @@ export async function upsertPlaces(places: Place[]): Promise<void> {
   }
 }
 
-export async function upsertPackingItems(items: PackingItem[]): Promise<void> {
-  await offlineDb.packingItems.bulkPut(items);
+export async function upsertPackingItems(items: StoredPackingItemRecord[]): Promise<void> {
+  for (const item of items) {
+    const [existing, trip, bag] = await Promise.all([
+      offlineDb.packingItems.get(item.id), offlineDb.trips.get(item.trip_id),
+      item.bag_id == null ? undefined : offlineDb.packingBags.get(item.bag_id),
+    ]);
+    const now = new Date().toISOString();
+    await offlineDb.packingItems.put({ ...existing, ...item, sync_id: existing?.sync_id || item.sync_id || randomId(),
+      trip_sync_id: existing?.trip_sync_id || item.trip_sync_id || trip?.sync_id || `orphan:${item.trip_id}`,
+      bag_sync_id: item.bag_id == null ? null : bag?.sync_id ?? existing?.bag_sync_id ?? null,
+      created_at: existing?.created_at || item.created_at || now, updated_at: item.updated_at || existing?.updated_at || now,
+      deleted_at: existing?.deleted_at ?? item.deleted_at ?? null });
+  }
 }
 
 export async function upsertTodoItems(items: TodoItem[]): Promise<void> {
-  await offlineDb.todoItems.bulkPut(items);
+  for (const item of items) {
+    const [existing, trip] = await Promise.all([offlineDb.todoItems.get(item.id), offlineDb.trips.get(item.trip_id)]);
+    const now = new Date().toISOString();
+    await offlineDb.todoItems.put({ ...existing, ...item, sync_id: existing?.sync_id || randomId(),
+      trip_sync_id: existing?.trip_sync_id || trip?.sync_id || `orphan:${item.trip_id}`,
+      created_at: existing?.created_at || now, updated_at: existing?.updated_at || now,
+      deleted_at: existing?.deleted_at ?? null });
+  }
 }
 
 export async function upsertBudgetItems(items: BudgetItem[]): Promise<void> {
@@ -814,6 +905,7 @@ export async function clearTripData(tripId: number): Promise<void> {
     'rw',
     [
       offlineDb.packingItems,
+      offlineDb.packingBags,
       offlineDb.todoItems,
       offlineDb.tripFiles,
       offlineDb.tripMembers,
@@ -824,8 +916,7 @@ export async function clearTripData(tripId: number): Promise<void> {
     async () => {
       // Migrated domain tables are the working database, not disposable download
       // caches. Clearing offline extras must never erase user-authored data.
-      await offlineDb.packingItems.where('trip_id').equals(tripId).delete();
-      await offlineDb.todoItems.where('trip_id').equals(tripId).delete();
+      // Packing and Todo are working data from v11/v12 onward, not disposable cache.
       await offlineDb.tripFiles.where('trip_id').equals(tripId).delete();
       await offlineDb.tripMembers.where('tripId').equals(tripId).delete();
       // Keep pending/syncing/conflict mutations — only purge dead 'failed' rows.

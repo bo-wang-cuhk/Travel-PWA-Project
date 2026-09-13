@@ -233,7 +233,7 @@ describe('offlineDb — blob cache budget', () => {
 })
 
   describe('offlineDb — clearTripData', () => {
-  it('FE-DB-OFFLINE-018: clears disposable caches but retains local-first Trip, Day and Place rows', async () => {
+  it('FE-DB-OFFLINE-018: clears disposable caches but retains every local-first business row', async () => {
     await upsertTrip(buildTrip({ id: 1 }))
     await upsertTrip(buildTrip({ id: 2 }))
     await upsertDays([buildDay({ id: 1, trip_id: 1 }), buildDay({ id: 2, trip_id: 2 })])
@@ -254,8 +254,8 @@ describe('offlineDb — blob cache budget', () => {
     expect(await offlineDb.trips.get(1)).toBeDefined()
     expect(await offlineDb.days.where('trip_id').equals(1).count()).toBe(1)
     expect(await offlineDb.places.where('trip_id').equals(1).count()).toBe(1)
-    expect(await offlineDb.packingItems.count()).toBe(0)
-    expect(await offlineDb.todoItems.count()).toBe(0)
+    expect(await offlineDb.packingItems.count()).toBe(1)
+    expect(await offlineDb.todoItems.count()).toBe(1)
     expect(await offlineDb.budgetItems.count()).toBe(1)
     expect(await offlineDb.reservations.count()).toBe(1)
     expect(await offlineDb.tripFiles.count()).toBe(0)
@@ -463,7 +463,7 @@ describe('offlineDb — connection proxy', () => {
     expect(await offlineDb.syncOutbox.get(`assignment:${migratedAssignment!.sync_id}`)).toMatchObject({ status: 'pending' })
   })
 
-  it('FE-DB-OFFLINE-032: upgrading v8 backfills Reservation and Accommodation UUID relations', async () => {
+  it('FE-DB-OFFLINE-032: upgrading v8 backfills Reservation, Accommodation, Todo and Packing UUID relations', async () => {
     const name = 'trek-offline-u59', legacy = new Dexie(name)
     legacy.version(8).stores({
       trips: 'id, &sync_id, deleted_at, updated_at', days: 'id, &sync_id, trip_id, trip_sync_id, [trip_sync_id+day_number], deleted_at, updated_at',
@@ -480,13 +480,22 @@ describe('offlineDb — connection proxy', () => {
     await legacy.table('accommodations').put({ id: 733, trip_id: 730, place_id: 732, start_day_id: 731, end_day_id: 731 })
     await legacy.table('reservations').put({ ...buildReservation({ id: 734, trip_id: 730, day_id: 731, place_id: 732 }), accommodation_id: 733 })
     await legacy.table('budgetItems').put(buildBudgetItem({ id: 735, trip_id: 730, reservation_id: 734, place_id: 732, name: 'Legacy expense' }))
+    await legacy.table('todoItems').put(buildTodoItem({ id: 736, trip_id: 730, name: 'Legacy todo' }))
+    await legacy.table('packingItems').put(buildPackingItem({ id: 737, trip_id: 730, name: 'Legacy packing item' }))
     legacy.close(); await reopenForUser(59)
     const stay = await offlineDb.accommodations.get(733), reservation = await offlineDb.reservations.get(734), budget = await offlineDb.budgetItems.get(735)
+    const todo = await offlineDb.todoItems.get(736), packing = await offlineDb.packingItems.get(737)
     expect(stay).toMatchObject({ trip_sync_id: 'trip-730', place_sync_id: 'place-732', start_day_sync_id: 'day-731', end_day_sync_id: 'day-731', deleted_at: null })
     expect(reservation).toMatchObject({ trip_sync_id: 'trip-730', day_sync_id: 'day-731', place_sync_id: 'place-732', accommodation_sync_id: stay?.sync_id, deleted_at: null })
     expect(await offlineDb.syncOutbox.get(`reservation:${reservation!.sync_id}`)).toMatchObject({ status: 'pending' })
     expect(budget).toMatchObject({ trip_sync_id: 'trip-730', reservation_sync_id: reservation?.sync_id, place_sync_id: 'place-732', deleted_at: null })
     expect(await offlineDb.syncOutbox.get(`budgetItem:${budget!.sync_id}`)).toMatchObject({ status: 'pending' })
+    expect(todo).toMatchObject({ trip_sync_id: 'trip-730', deleted_at: null })
+    expect(todo?.sync_id).toMatch(/^[0-9a-f-]{36}$/i)
+    expect(await offlineDb.syncOutbox.get(`todo:${todo!.sync_id}`)).toMatchObject({ status: 'pending', operation: 'upsert' })
+    expect(packing).toMatchObject({ trip_sync_id: 'trip-730', deleted_at: null })
+    expect(packing?.sync_id).toMatch(/^[0-9a-f-]{36}$/i)
+    expect(await offlineDb.syncOutbox.get(`packingItem:${packing!.sync_id}`)).toMatchObject({ status: 'pending', operation: 'upsert' })
   })
 })
 

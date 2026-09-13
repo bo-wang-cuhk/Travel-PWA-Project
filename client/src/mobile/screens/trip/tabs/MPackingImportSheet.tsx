@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { FileDown } from 'lucide-react'
 import MSheet from '../../../components/MSheet'
 import { Eyebrow, FIELD_AREA_CLS, FormSheetFooter, FormSheetHeader } from '../sheets/PlSheetChrome'
-import { packingApi } from '../../../../api/client'
+import { packingRepo } from '../../../../repo/packingRepo'
 import { useTripStore } from '../../../../store/tripStore'
 import { parseImportLines } from '../../../../components/Packing/packingListPanel.helpers'
 import type { TripPlanner } from '../MTripShell'
@@ -17,7 +17,7 @@ export interface MPackingImportSheetProps {
  * Bulk packing import (spec 03 §4.2 action-menu "Import"): one item per line,
  * `Category, Name, Weight(g), Bag, checked` — same parser + endpoint as the
  * desktop bulk-import modal (`packingListPanel.helpers.parseImportLines` +
- * `packingApi.bulkImport`), appended straight into the trip store so both
+ * `packingRepo.bulkImport`), appended straight into the trip store so both
  * surfaces stay consistent.
  */
 export default function MPackingImportSheet({ planner, open, onClose }: MPackingImportSheetProps) {
@@ -41,7 +41,7 @@ export default function MPackingImportSheet({ planner, open, onClose }: MPacking
     if (parsed.length === 0 || importing) return
     setImporting(true)
     try {
-      const result = await packingApi.bulkImport(tripId, parsed)
+      const result = await packingRepo.bulkImport(tripId, parsed)
       useTripStore.setState(s => ({ packingItems: [...s.packingItems, ...(result.items || [])] }))
       toast.success(t('packing.importSuccess', { count: result.count }))
       setText('')

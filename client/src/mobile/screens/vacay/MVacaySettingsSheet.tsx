@@ -6,7 +6,7 @@ import MToggle from '../../components/MToggle'
 import { useVacayStore } from '../../../store/vacayStore'
 import { getIntlLanguage, useTranslation } from '../../../i18n'
 import { useToast } from '../../../components/shared/Toast'
-import apiClient from '../../../api/client'
+import { localizedVacayCountries } from '../../../vacay/countries'
 import { fetchRegionOptions, fetchSchoolHolidayRegionOptions } from '../../../components/Vacay/holidayRegions'
 import { SCHOOL_HOLIDAY_COUNTRY_CONFIG } from '../../../vacay/schoolHolidayCountries'
 import { windowMonths } from '../../../vacay/yearWindow'
@@ -37,16 +37,7 @@ export default function MVacaySettingsSheet({ open, onClose }: MVacaySettingsShe
 
   useEffect(() => {
     if (!open) return
-    apiClient.get('/addons/vacay/holidays/countries').then(r => {
-      let displayNames: Intl.DisplayNames | undefined
-      try { displayNames = new Intl.DisplayNames([getIntlLanguage(language)], { type: 'region' }) } catch { /* */ }
-      const list: Option[] = r.data.map((c: { countryCode: string; name: string }) => ({
-        value: c.countryCode,
-        label: displayNames ? (displayNames.of(c.countryCode) || c.name) : c.name,
-      }))
-      list.sort((a, b) => a.label.localeCompare(b.label))
-      setCountries(list)
-    }).catch(() => {})
+    setCountries(localizedVacayCountries(getIntlLanguage(language)))
   }, [open, language])
 
   if (!plan) return null

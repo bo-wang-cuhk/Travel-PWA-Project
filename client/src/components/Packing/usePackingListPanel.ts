@@ -5,7 +5,8 @@ import { useCanDo } from '../../store/permissionsStore'
 import { useAuthStore } from '../../store/authStore'
 import { useToast } from '../shared/Toast'
 import { useTranslation } from '../../i18n'
-import { packingApi, tripsApi } from '../../api/client'
+import { tripsApi } from '../../api/client'
+import { packingRepo } from '../../repo/packingRepo'
 import { useAddonStore } from '../../store/addonStore'
 import { useNetworkMode } from '../../hooks/useNetworkMode'
 import { useBagTotalsPing } from './useBagTotalsPing'
@@ -77,14 +78,14 @@ export function usePackingList({ tripId, items, openImportSignal = 0, clearCheck
       if (data.members) all.push(...data.members.map((m: any) => ({ id: m.id, username: m.username, avatar: m.avatar_url, is_guest: !!m.is_guest })))
       setTripMembers(all)
     }).catch(() => {})
-    packingApi.getCategoryAssignees(tripId).then(data => {
+    packingRepo.getCategoryAssignees(tripId).then(data => {
       setCategoryAssignees(data.assignees || {})
     }).catch(() => {})
   }, [tripId])
 
   const handleSetAssignees = async (category: string, userIds: number[]) => {
     try {
-      const data = await packingApi.setCategoryAssignees(tripId, category, userIds)
+      const data = await packingRepo.setCategoryAssignees(tripId, category, userIds)
       setCategoryAssignees(prev => ({ ...prev, [category]: data.assignees || [] }))
     } catch {
       toast.error(t('packing.toast.saveError'))
@@ -225,7 +226,7 @@ export function usePackingList({ tripId, items, openImportSignal = 0, clearCheck
   const reloadBags = useCallback(async () => {
     if (!bagTrackingEnabled) return
     try {
-      const r = await packingApi.listBags(tripId)
+      const r = await packingRepo.listBags(tripId)
       setBags(r.bags || [])
       setUnassignedWeightGrams(r.unassigned_weight_grams ?? null)
     } catch {
@@ -254,7 +255,7 @@ export function usePackingList({ tripId, items, openImportSignal = 0, clearCheck
   const handleCreateBag = async () => {
     if (!newBagName.trim()) return
     try {
-      const data = await packingApi.createBag(tripId, { name: newBagName.trim(), color: BAG_COLORS[bags.length % BAG_COLORS.length] })
+      const data = await packingRepo.createBag(tripId, { name: newBagName.trim(), color: BAG_COLORS[bags.length % BAG_COLORS.length] })
       setBags(prev => [...prev, data.bag])
       setNewBagName(''); setShowAddBag(false)
     } catch { toast.error(t('packing.toast.saveError')) }
@@ -262,7 +263,7 @@ export function usePackingList({ tripId, items, openImportSignal = 0, clearCheck
 
   const handleCreateBagByName = async (name: string): Promise<PackingBag | undefined> => {
     try {
-      const data = await packingApi.createBag(tripId, { name, color: BAG_COLORS[bags.length % BAG_COLORS.length] })
+      const data = await packingRepo.createBag(tripId, { name, color: BAG_COLORS[bags.length % BAG_COLORS.length] })
       setBags(prev => [...prev, data.bag])
       return data.bag
     } catch { toast.error(t('packing.toast.saveError')); return undefined }
@@ -270,21 +271,21 @@ export function usePackingList({ tripId, items, openImportSignal = 0, clearCheck
 
   const handleDeleteBag = async (bagId: number) => {
     try {
-      await packingApi.deleteBag(tripId, bagId)
+      await packingRepo.deleteBag(tripId, bagId)
       setBags(prev => prev.filter(b => b.id !== bagId))
     } catch { toast.error(t('packing.toast.deleteError')) }
   }
 
   const handleUpdateBag = async (bagId: number, data: Record<string, any>) => {
     try {
-      const result = await packingApi.updateBag(tripId, bagId, data)
+      const result = await packingRepo.updateBag(tripId, bagId, data)
       setBags(prev => prev.map(b => b.id === bagId ? { ...b, ...result.bag } : b))
     } catch { toast.error(t('common.error')) }
   }
 
   const handleSetBagMembers = async (bagId: number, userIds: number[]) => {
     try {
-      const result = await packingApi.setBagMembers(tripId, bagId, userIds)
+      const result = await packingRepo.setBagMembers(tripId, bagId, userIds)
       setBags(prev => prev.map(b => b.id === bagId ? { ...b, members: result.members } : b))
     } catch { toast.error(t('common.error')) }
   }
@@ -326,7 +327,7 @@ export function usePackingList({ tripId, items, openImportSignal = 0, clearCheck
   const templateDropdownRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    packingApi.listTemplates(tripId).then(d => setAvailableTemplates(d.templates || [])).catch(() => {})
+    packingRepo.listTemplates().then(d => setAvailableTemplates(d.templates || [])).catch(() => {})
   }, [tripId])
 
   useEffect(() => {
@@ -341,7 +342,7 @@ export function usePackingList({ tripId, items, openImportSignal = 0, clearCheck
   const handleApplyTemplate = async (templateId: number) => {
     setApplyingTemplate(true)
     try {
-      const data = await packingApi.applyTemplate(tripId, templateId, view)
+      const data = await packingRepo.applyTemplate(tripId, templateId, view)
       useTripStore.setState(s => ({ packingItems: [...s.packingItems, ...(data.items || [])] }))
       toast.success(t('packing.templateApplied', { count: data.count }))
       setShowTemplateDropdown(false)
@@ -355,11 +356,11 @@ export function usePackingList({ tripId, items, openImportSignal = 0, clearCheck
   const handleSaveAsTemplate = async () => {
     if (!saveTemplateName.trim()) return
     try {
-      await packingApi.saveAsTemplate(tripId, saveTemplateName.trim())
+      await packingRepo.saveAsTemplate(tripId, saveTemplateName.trim())
       toast.success(t('packing.templateSaved'))
       setShowSaveTemplate(false)
       setSaveTemplateName('')
-      packingApi.listTemplates(tripId).then(d => setAvailableTemplates(d.templates || [])).catch(() => {})
+      packingRepo.listTemplates().then(d => setAvailableTemplates(d.templates || [])).catch(() => {})
     } catch {
       toast.error(t('common.error'))
     }
@@ -369,7 +370,7 @@ export function usePackingList({ tripId, items, openImportSignal = 0, clearCheck
     const parsed = parseImportLines(importText)
     if (parsed.length === 0) { toast.error(t('packing.importEmpty')); return }
     try {
-      const result = await packingApi.bulkImport(tripId, parsed)
+      const result = await packingRepo.bulkImport(tripId, parsed)
       useTripStore.setState(s => ({ packingItems: [...s.packingItems, ...(result.items || [])] }))
       toast.success(t('packing.importSuccess', { count: result.count }))
       setImportText('')

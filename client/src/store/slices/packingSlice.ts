@@ -1,5 +1,4 @@
 import { packingRepo } from '../../repo/packingRepo'
-import { packingApi } from '../../api/client'
 import type { StoreApi } from 'zustand'
 import type { TripStoreState } from '../tripStore'
 import type { PackingItem } from '../../types'
@@ -29,7 +28,7 @@ export const createPackingSlice = (set: SetState, get: GetState): PackingSlice =
       set(state => ({ packingItems: [...state.packingItems, result.item] }))
       return result.item
     } catch (err: unknown) {
-      throw new Error(getApiErrorMessage(err, 'Error adding item'))
+      throw new Error(getApiErrorMessage(err, 'Error adding item'), { cause: err })
     }
   },
 
@@ -41,7 +40,7 @@ export const createPackingSlice = (set: SetState, get: GetState): PackingSlice =
       }))
       return result.item
     } catch (err: unknown) {
-      throw new Error(getApiErrorMessage(err, 'Error updating item'))
+      throw new Error(getApiErrorMessage(err, 'Error updating item'), { cause: err })
     }
   },
 
@@ -52,7 +51,7 @@ export const createPackingSlice = (set: SetState, get: GetState): PackingSlice =
       await packingRepo.delete(tripId, id)
     } catch (err: unknown) {
       set({ packingItems: prev })
-      throw new Error(getApiErrorMessage(err, 'Error deleting item'))
+      throw new Error(getApiErrorMessage(err, 'Error deleting item'), { cause: err })
     }
   },
 
@@ -92,7 +91,7 @@ export const createPackingSlice = (set: SetState, get: GetState): PackingSlice =
       return { packingItems: [...reordered, ...remaining] }
     })
     try {
-      await packingApi.reorder(tripId, orderedIds)
+      await packingRepo.reorder(tripId, orderedIds)
     } catch (err: unknown) {
       set({ packingItems: prev })
       notify(getApiErrorMessage(err, 'Error reordering items'), 'error')
@@ -102,7 +101,7 @@ export const createPackingSlice = (set: SetState, get: GetState): PackingSlice =
   // ── Three-tier sharing (#858) ──────────────────────────────────────────────
   setPackingItemSharing: async (tripId, id, visibility, recipientIds) => {
     try {
-      const result = await packingApi.setSharing(tripId, id, { visibility, recipient_ids: recipientIds })
+      const result = await packingRepo.setSharing(tripId, id, { visibility, recipient_ids: recipientIds })
       set(state => ({ packingItems: state.packingItems.map(i => i.id === id ? result.item : i) }))
     } catch (err: unknown) {
       notify(getApiErrorMessage(err, 'Error updating sharing'), 'error')
@@ -112,7 +111,7 @@ export const createPackingSlice = (set: SetState, get: GetState): PackingSlice =
 
   clonePackingItem: async (tripId, id) => {
     try {
-      const result = await packingApi.clone(tripId, id)
+      const result = await packingRepo.clone(tripId, id)
       set(state => (state.packingItems.some(i => i.id === result.item.id) ? {} : { packingItems: [...state.packingItems, result.item] }))
     } catch (err: unknown) {
       notify(getApiErrorMessage(err, 'Error copying item'), 'error')
@@ -121,7 +120,7 @@ export const createPackingSlice = (set: SetState, get: GetState): PackingSlice =
 
   addPackingContributor: async (tripId, id) => {
     try {
-      const result = await packingApi.addContributor(tripId, id)
+      const result = await packingRepo.addContributor(tripId, id)
       set(state => ({ packingItems: state.packingItems.map(i => i.id === id ? result.item : i) }))
     } catch (err: unknown) {
       notify(getApiErrorMessage(err, 'Error joining item'), 'error')
@@ -130,7 +129,7 @@ export const createPackingSlice = (set: SetState, get: GetState): PackingSlice =
 
   removePackingContributor: async (tripId, id, userId) => {
     try {
-      const result = await packingApi.removeContributor(tripId, id, userId)
+      const result = await packingRepo.removeContributor(tripId, id, userId)
       set(state => ({ packingItems: state.packingItems.map(i => i.id === id ? result.item : i) }))
     } catch (err: unknown) {
       notify(getApiErrorMessage(err, 'Error leaving item'), 'error')

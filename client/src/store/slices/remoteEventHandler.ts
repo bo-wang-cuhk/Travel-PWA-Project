@@ -2,7 +2,7 @@ import type { StoreApi } from 'zustand'
 import type { TrekWsTripEventName } from '@trek/shared'
 import type { TripStoreState } from '../tripStore'
 import type { Assignment, Place, Day, DayNote, PackingItem, TodoItem, BudgetItem, BudgetItemMember, Reservation, Trip, TripFile, WebSocketEvent } from '../../types'
-import { offlineDb, upsertAssignmentsFromDays, upsertBudgetItems, upsertDays, upsertPlaces, upsertReservations } from '../../db/offlineDb'
+import { offlineDb, upsertAssignmentsFromDays, upsertBudgetItems, upsertDays, upsertPackingItems, upsertPlaces, upsertReservations, upsertTodoItems } from '../../db/offlineDb'
 import { useAuthStore } from '../authStore'
 import { mergeAssignmentPlace } from './placesSlice'
 
@@ -52,10 +52,10 @@ const putPackingItem: DexieWriter = async payload => {
     await offlineDb.packingItems.delete(item.id)
     return
   }
-  await offlineDb.packingItems.put(item)
+  await upsertPackingItems([item])
 }
 const putTodoItem: DexieWriter = async payload => {
-  await offlineDb.todoItems.put(payload.item as TodoItem)
+  await upsertTodoItems([payload.item as TodoItem])
 }
 const putBudgetItem: DexieWriter = async payload => {
   await upsertBudgetItems([payload.item as BudgetItem])

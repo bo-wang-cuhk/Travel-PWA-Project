@@ -2,9 +2,9 @@
 
 ## 1. Current architecture
 
-TREK originally treats the server as the source of truth. Its existing Dexie database is an offline cache and its `mutationQueue` replays REST requests. In the standalone PWA, Trip, Day, Place, Assignment, Accommodation, Reservation and Expense/Budget CRUD now use their repositories and IndexedDB, while later child modules remain server-backed.
+TREK originally treats the server as the source of truth. Its existing Dexie database is an offline cache and its `mutationQueue` replays REST requests. In the standalone PWA, Trip, Day, Place, Assignment, Accommodation, Reservation, Expense/Budget, Todo, Packing and personal Vacay data now use repositories and IndexedDB.
 
-The migration proceeds by dependency boundary: Trip, then Day, then Place and Assignment, then Accommodation and Reservation, then Expense/Budget. The legacy server cache sync remains intact for non-standalone TREK operation.
+The migration proceeds by dependency boundary: Trip, Day, Place/Assignment, Accommodation/Reservation, Expense/Budget, then list and personal-planning modules. The legacy server cache sync remains intact for non-standalone TREK operation.
 
 ## 2. Target architecture
 
@@ -31,7 +31,7 @@ No UI write waits for a provider request. Provider errors affect sync status onl
 Local write:
 
 ```text
-Trip/Day/Place/Assignment/Accommodation/Reservation/Expense Repository transaction
+Domain Repository transaction
   ├── write the domain row
   ├── upsert syncOutbox
   └── mark entitySyncMeta pending
@@ -45,7 +45,7 @@ Repositories own local business CRUD, timestamps, UUID creation, tombstones and 
 
 ## 5. IndexedDB responsibility
 
-Dexie is the working database and persists business rows, provider-neutral sync metadata, conflicts, provider configuration and device-local credentials. Version 6 migrates Trip, version 7 migrates Day, version 8 migrates Place and Assignment, version 9 migrates Accommodation and Reservation, and version 10 migrates Expense/Budget without clearing data.
+Dexie is the working database and persists business rows, provider-neutral sync metadata, conflicts, provider configuration and device-local credentials. Versions 6–10 migrate the Trip graph through Expense/Budget; version 11 migrates Todo; version 12 migrates Packing items, bags and configuration; version 13 adds the personal Vacay aggregate. No migration clears existing data.
 
 Numeric ids remain temporary local compatibility keys. `sync_id` is the canonical UUID exported to providers. Day and Place carry a Trip UUID; Assignment carries Trip, Day and Place UUIDs. Numeric ids are never exported.
 
@@ -56,6 +56,8 @@ Version 8 gives Place the same lifecycle metadata and extracts legacy Assignment
 Version 9 adds canonical UUIDs and relation UUIDs to Accommodation and Reservation, preserves numeric ids as local compatibility keys, and queues valid legacy rows for initial sync. Reservation day-position keys and day references nested in transport metadata are translated to Day UUIDs at the provider boundary. Traveler/account projections and external-service state are deliberately excluded from the portable payload.
 
 Version 10 adds canonical UUIDs and Trip, Reservation and Place UUID relations to Expense/Budget rows. Member and payer names/amounts are portable snapshots, while provider-specific fields stay outside the domain model. Invalid legacy relations are retained locally, marked as migration errors and excluded from upload.
+
+Version 11 adds Todo UUIDs, Trip UUIDs, timestamps and tombstones. Version 12 gives Packing items and bags independent UUIDs, translates item-to-bag links to UUIDs and stores templates/category assignments in a provider-neutral personal configuration. Version 13 stores Vacay plan settings, years, entries, company holidays, entitlement and leave-year settings as a small personal aggregate; removed date entries retain tombstone timestamps.
 
 ## 6. SyncManager responsibility
 
@@ -82,6 +84,10 @@ trips/<trip-uuid>/assignments.json
 trips/<trip-uuid>/accommodations.json
 trips/<trip-uuid>/reservations.json
 trips/<trip-uuid>/expenses.json
+trips/<trip-uuid>/todos.json
+trips/<trip-uuid>/packing.json
+packing/settings.json
+vacay/plan.json
 ```
 
 The manifest contains schema version and per-entity path, parent UUIDs, timestamps, tombstone and opaque content version. It does not duplicate domain payloads. Child entities are grouped by Trip in their respective files, while conflict metadata remains per entity.
@@ -109,7 +115,7 @@ A static PWA cannot protect a stored token from malicious code executing in the 
 
 ## 13. Schema migration strategy
 
-All changes use Dexie version upgrades. Version 6 backfills Trip; version 7 adds Day identity and parent indexes; version 8 adds Place identity and the Assignment table; version 9 adds Accommodation and Reservation identities; version 10 adds Expense/Budget identities, relation indexes and outbox backfill. No reinstall, storage clear or destructive migration is required. Tombstones are retained until a future garbage-collection policy is implemented.
+All changes use Dexie version upgrades. Versions 6–10 cover the Trip graph through Expense/Budget; versions 11–13 add Todo, Packing and Vacay. No reinstall, storage clear or destructive migration is required. Tombstones are retained until a future garbage-collection policy is implemented.
 
 ## 14. Future Supabase integration
 
@@ -117,8 +123,8 @@ All changes use Dexie version upgrades. Version 6 backfills Trip; version 7 adds
 
 ## Implemented boundary
 
-Trip, Day, Place, Assignment, Accommodation, Reservation and Expense/Budget are migrated. Their normal CRUD and ordering operations are local-first and sync through the provider-neutral outbox. Reservation creation can atomically create a linked Accommodation and requested Expense. Deleting or shrinking a parent also tombstones or unlinks affected children so dangling relations are not synced. Expense member/payment flags, payer splits, category order and Reservation price mirroring persist locally.
+Trip, Day, Place, Assignment, Accommodation, Reservation, Expense/Budget, Todo, Packing and personal Vacay are migrated. Normal CRUD, toggles and ordering operations are local-first and sync through the provider-neutral outbox. Packing bags, item sharing snapshots, category assignments and personal templates persist locally; bags/items and configuration sync separately to reduce conflicts. Vacay date marking, company holidays, plan/year settings and entitlement work without the TREK Server.
 
-DayNote items, Todo, Packing, files, collaboration, Auth and server removal are not implemented. Day title and whole-day notes are fields of Day and are migrated; the separate DayNote item collection is not. Place image upload and collaborative rating, Assignment participants, Reservation travelers, booking parsing/import, upcoming-booking aggregation and external AirTrail refresh remain online-only enhancements. Expense settlement records and live exchange-rate refresh remain online services and are not included in GitHub sync.
+DayNote items, files, collaboration, Auth and server removal are not implemented. Day title and whole-day notes are fields of Day and are migrated; the separate DayNote item collection is not. Place image upload and collaborative rating, Assignment participants, Reservation travelers, booking parsing/import, upcoming-booking aggregation and external AirTrail refresh remain online-only enhancements. Expense settlement records and live exchange-rate refresh remain online services and are not included in GitHub sync. Vacay Fusion, invites and read-only sharing are disabled in personal mode. German public holidays have an offline calculator; other public/school-holiday feeds remain a future replaceable online service and never block personal date marking.
 
 The legacy TREK Server cache/WebSocket path remains for non-standalone use, but it is not part of the GitHub Pages core write path. “Clear offline data” retains all migrated working rows and only removes disposable, not-yet-migrated caches.

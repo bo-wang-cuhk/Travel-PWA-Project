@@ -7,7 +7,6 @@ import { useTranslation } from '../../i18n'
 import { getApiErrorMessage } from '../../types'
 import { useToast } from '../shared/Toast'
 import CustomSelect from '../shared/CustomSelect'
-import apiClient from '../../api/client'
 import VacayBadge from './VacayBadge'
 
 const PRESET_COLORS = [
@@ -25,7 +24,7 @@ export default function VacayPersons() {
   // Default selectedUserId to current user
   useEffect(() => {
     if (!selectedUserId && currentUser) setSelectedUserId(currentUser.id)
-  }, [currentUser, selectedUserId])
+  }, [currentUser, selectedUserId, setSelectedUserId])
   const [showInvite, setShowInvite] = useState(false)
   const [showColorPicker, setShowColorPicker] = useState(false)
   const [colorEditUserId, setColorEditUserId] = useState(null)
@@ -33,12 +32,7 @@ export default function VacayPersons() {
   const [selectedInviteUser, setSelectedInviteUser] = useState(null)
   const [inviting, setInviting] = useState(false)
 
-  const loadAvailable = async () => {
-    try {
-      const data = await apiClient.get('/addons/vacay/available-users').then(r => r.data)
-      setAvailableUsers(data.users)
-    } catch { /* */ }
-  }
+  const loadAvailable = async () => setAvailableUsers([])
 
   const handleInvite = async () => {
     if (!selectedInviteUser) return

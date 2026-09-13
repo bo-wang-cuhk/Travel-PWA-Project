@@ -5,9 +5,12 @@ import type { SyncedAccommodation } from '../../../domain/accommodationSyncModel
 import type { SyncedReservation } from '../../../domain/reservationSyncModel'
 import type { SyncedBudgetItem } from '../../../domain/budgetSyncModel'
 import type { SyncedTrip } from '../../../domain/tripSyncModel'
+import type { SyncedTodo } from '../../../domain/todoSyncModel'
+import type { SyncedPackingBag, SyncedPackingConfig, SyncedPackingItem } from '../../../domain/packingSyncModel'
+import type { SyncedVacay } from '../../../domain/vacaySyncModel'
 import type { GitHubSyncPublicConfig, LocalChange, ProviderStatus, PushResult, RemoteChanges, SyncProvider } from '../../types'
 import { GitHubApi, GitHubApiError } from './githubApi'
-import { EMPTY_MANIFEST, type GitHubAccommodationsFile, type GitHubAssignmentsFile, type GitHubBudgetItemsFile, type GitHubDaysFile, type GitHubManifest, type GitHubPlacesFile, type GitHubReservationsFile } from './githubTypes'
+import { EMPTY_MANIFEST, type GitHubAccommodationsFile, type GitHubAssignmentsFile, type GitHubBudgetItemsFile, type GitHubDaysFile, type GitHubManifest, type GitHubPackingFile, type GitHubPlacesFile, type GitHubReservationsFile, type GitHubTodosFile } from './githubTypes'
 
 export class RemoteAdvancedError extends Error {
   constructor() {
@@ -158,8 +161,33 @@ export class GitHubSyncProvider implements SyncProvider {
       if (file.schemaVersion !== 1 || file.tripId !== entry.tripId || !payload) throw new Error(`Invalid remote budget item ${entityId}`)
       return { entityType: 'budgetItem' as const, entityId, operation: entry.deletedAt ? 'delete' as const : 'upsert' as const, remoteVersion: entry.contentHash, payload }
     }))
+    const todoFiles = new Map<string, Promise<GitHubTodosFile>>()
+    const todoChanges = await Promise.all(Object.entries(manifest.todos ?? {}).filter(([, entry]) => !manifest.trips[entry.tripId]?.deletedAt).map(async ([entityId, entry]) => {
+      let promise = todoFiles.get(entry.path); if (!promise) { promise = this.api.getFile<GitHubTodosFile>(entry.path).then(v => v.value); todoFiles.set(entry.path, promise) }
+      const file = await promise; const payload = file.todos.find(v => v.id === entityId)
+      if (file.schemaVersion !== 1 || file.tripId !== entry.tripId || !payload) throw new Error(`Invalid remote todo ${entityId}`)
+      return { entityType: 'todo' as const, entityId, operation: entry.deletedAt ? 'delete' as const : 'upsert' as const, remoteVersion: entry.contentHash, payload }
+    }))
+    const packingFiles = new Map<string, Promise<GitHubPackingFile>>()
+    const getPacking = (path: string) => { let promise = packingFiles.get(path); if (!promise) { promise = this.api.getFile<GitHubPackingFile>(path).then(v => v.value); packingFiles.set(path, promise) } return promise }
+    const packingBagChanges = await Promise.all(Object.entries(manifest.packingBags ?? {}).filter(([, entry]) => !manifest.trips[entry.tripId]?.deletedAt).map(async ([entityId, entry]) => {
+      const file = await getPacking(entry.path); const payload = file.bags.find(v => v.id === entityId)
+      if (file.schemaVersion !== 1 || file.tripId !== entry.tripId || !payload) throw new Error(`Invalid remote packing bag ${entityId}`)
+      return { entityType: 'packingBag' as const, entityId, operation: entry.deletedAt ? 'delete' as const : 'upsert' as const, remoteVersion: entry.contentHash, payload }
+    }))
+    const packingItemChanges = await Promise.all(Object.entries(manifest.packingItems ?? {}).filter(([, entry]) => !manifest.trips[entry.tripId]?.deletedAt).map(async ([entityId, entry]) => {
+      const file = await getPacking(entry.path); const payload = file.items.find(v => v.id === entityId)
+      if (file.schemaVersion !== 1 || file.tripId !== entry.tripId || !payload) throw new Error(`Invalid remote packing item ${entityId}`)
+      return { entityType: 'packingItem' as const, entityId, operation: entry.deletedAt ? 'delete' as const : 'upsert' as const, remoteVersion: entry.contentHash, payload }
+    }))
+    const vacayChanges = manifest.vacay ? [manifest.vacay.deletedAt
+      ? { entityType: 'vacay' as const, entityId: 'personal-vacay', operation: 'delete' as const, remoteVersion: manifest.vacay.contentHash }
+      : { entityType: 'vacay' as const, entityId: 'personal-vacay', operation: 'upsert' as const, remoteVersion: manifest.vacay.contentHash, payload: (await this.api.getFile<SyncedVacay>(manifest.vacay.path)).value }] : []
+    const packingConfigChanges = manifest.packingConfig ? [manifest.packingConfig.deletedAt
+      ? { entityType: 'packingConfig' as const, entityId: 'personal-packing', operation: 'delete' as const, remoteVersion: manifest.packingConfig.contentHash }
+      : { entityType: 'packingConfig' as const, entityId: 'personal-packing', operation: 'upsert' as const, remoteVersion: manifest.packingConfig.contentHash, payload: (await this.api.getFile<SyncedPackingConfig>(manifest.packingConfig.path)).value }] : []
     // Dependency order is reinforced by SyncManager before applying.
-    return { cursor: head, changes: [...tripChanges, ...dayChanges, ...placeChanges, ...assignmentChanges, ...accommodationChanges, ...reservationChanges, ...budgetChanges] }
+    return { cursor: head, changes: [...tripChanges, ...dayChanges, ...placeChanges, ...assignmentChanges, ...accommodationChanges, ...reservationChanges, ...budgetChanges, ...todoChanges, ...packingBagChanges, ...packingItemChanges, ...packingConfigChanges, ...vacayChanges] }
   }
 
   async push(changes: LocalChange[], cursor?: string | null): Promise<PushResult> {
@@ -176,7 +204,7 @@ export class GitHubSyncProvider implements SyncProvider {
     try { manifest = (await this.api.getFile<GitHubManifest>('manifest.json')).value }
     catch (error) {
       if (!(error instanceof GitHubApiError) || error.status !== 404) throw error
-      manifest = { ...EMPTY_MANIFEST, trips: {}, days: {}, places: {}, assignments: {}, accommodations: {}, reservations: {}, budgetItems: {} }
+      manifest = { ...EMPTY_MANIFEST, trips: {}, days: {}, places: {}, assignments: {}, accommodations: {}, reservations: {}, budgetItems: {}, todos: {}, packingBags: {}, packingItems: {} }
     }
 
     const next: GitHubManifest = {
@@ -188,6 +216,9 @@ export class GitHubSyncProvider implements SyncProvider {
       accommodations: { ...(manifest.accommodations ?? {}) },
       reservations: { ...(manifest.reservations ?? {}) },
       budgetItems: { ...(manifest.budgetItems ?? {}) },
+      todos: { ...(manifest.todos ?? {}) },
+      packingBags: { ...(manifest.packingBags ?? {}) },
+      packingItems: { ...(manifest.packingItems ?? {}) },
       updatedAt: new Date().toISOString(),
     }
     const treeEntries: Array<{ path: string; sha: string | null }> = []
@@ -400,6 +431,60 @@ export class GitHubSyncProvider implements SyncProvider {
       const blob = await this.api.createBlob({ schemaVersion: 1, tripId, updatedAt: next.updatedAt,
         budgetItems: [...byId.values()].sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id)) } satisfies GitHubBudgetItemsFile)
       treeEntries.push({ path, sha: blob.sha })
+    }
+
+    const todoGroups = new Map<string, LocalChange[]>()
+    for (const change of changes.filter(item => item.entityType === 'todo')) {
+      const value = change.payload as SyncedTodo | undefined
+      if (!value || value.schemaVersion !== 1 || value.id !== change.entityId || !value.tripId) throw new Error(`Invalid local todo ${change.entityId}`)
+      const group = todoGroups.get(value.tripId) ?? []; group.push(change); todoGroups.set(value.tripId, group)
+    }
+    for (const [tripId, group] of todoGroups) {
+      const path = `trips/${tripId}/todos.json`; let file: GitHubTodosFile
+      try { file = (await this.api.getFile<GitHubTodosFile>(path)).value } catch (error) {
+        if (!(error instanceof GitHubApiError) || error.status !== 404) throw error
+        file = { schemaVersion: 1, tripId, updatedAt: next.updatedAt, todos: [] }
+      }
+      if (file.schemaVersion !== 1 || file.tripId !== tripId || !Array.isArray(file.todos)) throw new Error(`Invalid remote todos file ${path}`)
+      const byId = new Map(file.todos.map(item => [item.id, item]))
+      for (const change of group) { const value = change.payload as SyncedTodo; byId.set(value.id, value); const version = `${value.updatedAt}:${value.deletedAt ?? 'active'}`; next.todos![value.id] = { path, tripId, updatedAt: value.updatedAt, deletedAt: value.deletedAt, contentHash: version }; versions[value.id] = version }
+      const blob = await this.api.createBlob({ schemaVersion: 1, tripId, updatedAt: next.updatedAt, todos: [...byId.values()].sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id)) } satisfies GitHubTodosFile)
+      treeEntries.push({ path, sha: blob.sha })
+    }
+
+    const packingGroups = new Map<string, LocalChange[]>()
+    for (const change of changes.filter(item => item.entityType === 'packingBag' || item.entityType === 'packingItem')) {
+      const value = change.payload as SyncedPackingBag | SyncedPackingItem | undefined
+      if (!value || value.schemaVersion !== 1 || value.id !== change.entityId || !value.tripId) throw new Error(`Invalid local packing entity ${change.entityId}`)
+      const group = packingGroups.get(value.tripId) ?? []; group.push(change); packingGroups.set(value.tripId, group)
+    }
+    for (const [tripId, group] of packingGroups) {
+      const path = `trips/${tripId}/packing.json`; let file: GitHubPackingFile
+      try { file = (await this.api.getFile<GitHubPackingFile>(path)).value } catch (error) {
+        if (!(error instanceof GitHubApiError) || error.status !== 404) throw error
+        file = { schemaVersion: 1, tripId, updatedAt: next.updatedAt, bags: [], items: [] }
+      }
+      if (file.schemaVersion !== 1 || file.tripId !== tripId || !Array.isArray(file.bags) || !Array.isArray(file.items)) throw new Error(`Invalid remote packing file ${path}`)
+      const bags = new Map(file.bags.map(item => [item.id, item])); const items = new Map(file.items.map(item => [item.id, item]))
+      for (const change of group) {
+        if (change.entityType === 'packingBag') { const value = change.payload as SyncedPackingBag; bags.set(value.id, value); const version = `${value.updatedAt}:${value.deletedAt ?? 'active'}`; next.packingBags![value.id] = { path, tripId, updatedAt: value.updatedAt, deletedAt: value.deletedAt, contentHash: version }; versions[value.id] = version }
+        else { const value = change.payload as SyncedPackingItem; items.set(value.id, value); const version = `${value.updatedAt}:${value.deletedAt ?? 'active'}`; next.packingItems![value.id] = { path, tripId, updatedAt: value.updatedAt, deletedAt: value.deletedAt, contentHash: version }; versions[value.id] = version }
+      }
+      const blob = await this.api.createBlob({ schemaVersion: 1, tripId, updatedAt: next.updatedAt, bags: [...bags.values()].sort((a, b) => a.sortOrder - b.sortOrder), items: [...items.values()].sort((a, b) => a.sortOrder - b.sortOrder) } satisfies GitHubPackingFile)
+      treeEntries.push({ path, sha: blob.sha })
+    }
+
+    for (const change of changes.filter(item => item.entityType === 'vacay')) {
+      const value = change.payload as SyncedVacay | undefined
+      if (!value || value.schemaVersion !== 1 || value.id !== change.entityId) throw new Error(`Invalid local vacay ${change.entityId}`)
+      const path = 'vacay/plan.json'; const blob = await this.api.createBlob(value); const version = `${value.updatedAt}:${value.deletedAt ?? 'active'}`
+      next.vacay = { path, updatedAt: value.updatedAt, deletedAt: value.deletedAt, contentHash: version }; versions[value.id] = version; treeEntries.push({ path, sha: blob.sha })
+    }
+    for (const change of changes.filter(item => item.entityType === 'packingConfig')) {
+      const value = change.payload as SyncedPackingConfig | undefined
+      if (!value || value.schemaVersion !== 1 || value.id !== change.entityId) throw new Error(`Invalid local packing config ${change.entityId}`)
+      const path = 'packing/settings.json'; const blob = await this.api.createBlob(value); const version = `${value.updatedAt}:active`
+      next.packingConfig = { path, updatedAt: value.updatedAt, deletedAt: null, contentHash: version }; versions[value.id] = version; treeEntries.push({ path, sha: blob.sha })
     }
 
     const manifestBlob = await this.api.createBlob(next)

@@ -6,7 +6,6 @@ import { useVacayStore } from '../../../store/vacayStore'
 import { useTranslation } from '../../../i18n'
 import { useToast } from '../../../components/shared/Toast'
 import { getApiErrorMessage } from '../../../types'
-import apiClient from '../../../api/client'
 
 interface MVacayShareSheetProps {
   open: boolean
@@ -33,9 +32,7 @@ export default function MVacayShareSheet({ open, onClose }: MVacayShareSheetProp
     if (!open) return
     setSelected(null)
     setPickerOpen(false)
-    apiClient.get('/addons/vacay/shares/available-users')
-      .then(r => setAvailable(r.data.users))
-      .catch(() => setAvailable([]))
+    setAvailable([])
   }, [open])
 
   const selectedUser = available.find(u => u.id === selected)

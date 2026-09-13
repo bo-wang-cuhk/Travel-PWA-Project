@@ -6,6 +6,9 @@ import type { SyncedAssignment } from '../../../domain/assignmentSyncModel'
 import type { SyncedAccommodation } from '../../../domain/accommodationSyncModel'
 import type { SyncedReservation } from '../../../domain/reservationSyncModel'
 import type { SyncedBudgetItem } from '../../../domain/budgetSyncModel'
+import type { SyncedTodo } from '../../../domain/todoSyncModel'
+import type { SyncedPackingBag, SyncedPackingConfig, SyncedPackingItem } from '../../../domain/packingSyncModel'
+import type { SyncedVacay } from '../../../domain/vacaySyncModel'
 import { EMPTY_MANIFEST, type GitHubManifest } from './githubTypes'
 import { GitHubSyncProvider, RemoteAdvancedError } from './GitHubSyncProvider'
 
@@ -76,6 +79,11 @@ const budgetItem: SyncedBudgetItem = {
   payers: [{ userId: 1, username: 'alice', amount: 42 }],
   createdAt: day.createdAt, updatedAt: '2026-01-07T00:00:00.000Z', deletedAt: null,
 }
+const todo: SyncedTodo = { schemaVersion: 1, id: '88888888-8888-4888-8888-888888888888', tripId: trip.id, name: 'Passport', category: null, checked: 0, sortOrder: 0, dueDate: null, description: null, assignedUserId: null, assignedUserName: null, priority: 0, createdAt: day.createdAt, updatedAt: '2026-01-08T00:00:00.000Z', deletedAt: null }
+const packingBag: SyncedPackingBag = { schemaVersion: 1, id: '99999999-9999-4999-8999-999999999999', tripId: trip.id, name: 'Carry-on', color: '#000', weightLimitGrams: null, sortOrder: 0, userId: null, assignedUsername: null, members: [], createdAt: day.createdAt, updatedAt: '2026-01-09T00:00:00.000Z', deletedAt: null }
+const packingItem: SyncedPackingItem = { schemaVersion: 1, id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', tripId: trip.id, bagId: packingBag.id, name: 'Shoes', checked: 0, category: null, sortOrder: 0, weightGrams: null, quantity: 1, visibility: 'common', ownerId: null, ownerName: null, recipients: [], contributors: [], createdAt: day.createdAt, updatedAt: '2026-01-10T00:00:00.000Z', deletedAt: null }
+const packingConfig: SyncedPackingConfig = { schemaVersion: 1, id: 'personal-packing', categoryAssignees: {}, templates: [{ id: -1, syncId: 'template-a', name: 'Basic', items: [{ name: 'Shoes' }] }], updatedAt: '2026-01-10T00:00:00.000Z' }
+const vacay: SyncedVacay = { schemaVersion: 1, id: 'personal-vacay', plan: { id: -1, holidays_enabled: false, holidays_region: null, holiday_calendars: [], block_weekends: true, carry_over_enabled: false, company_holidays_enabled: true }, users: [{ id: 1, username: 'me', color: '#00f' }], years: [2026], entries: [{ date: '2026-06-20', user_id: 1 }], companyHolidays: [], stats: [], yearSettings: { year_type: 'calendar', year_start_month: 1, year_start_day: 1, hire_date: null }, entryTombstones: {}, updatedAt: '2026-01-11T00:00:00.000Z', deletedAt: null }
 
 function response(value: unknown, status = 200): Response {
   return new Response(status === 204 ? null : JSON.stringify(value), {
@@ -336,5 +344,33 @@ describe('GitHubSyncProvider', () => {
     expect(result.versions[budgetItem.id]).toBe(`${budgetItem.updatedAt}:active`)
     const tree = JSON.parse(String(requests.find(item => item.url.endsWith('/git/trees'))!.init.body)).tree
     expect(tree.map((entry: { path: string }) => entry.path)).toEqual([`trips/${trip.id}/expenses.json`, 'manifest.json'])
+  })
+
+  it('patches Todo, Packing and Vacay documents in one atomic commit', async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = []; let blob = 0
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init = {}) => {
+      const url = String(input); requests.push({ url, init })
+      if (url.endsWith('/repos/me/travel-data')) return response({ permissions: { push: true } })
+      if (url.includes('/git/ref/heads/main')) return response({ object: { sha: 'head-1' } })
+      if (url.includes('/git/commits/head-1')) return response({ tree: { sha: 'tree-1' } })
+      if (url.includes('/contents/manifest.json')) return response(file({ ...EMPTY_MANIFEST }))
+      if (url.includes('/todos.json') || url.includes('/packing.json')) return response({ message: 'Not Found' }, 404)
+      if (url.endsWith('/git/blobs')) return response({ sha: `blob-${++blob}` })
+      if (url.endsWith('/git/trees')) return response({ sha: 'tree-2' })
+      if (url.endsWith('/git/commits')) return response({ sha: 'commit-2' })
+      if (url.includes('/git/refs/heads/main')) return response({})
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const provider = new GitHubSyncProvider(config, 'secret'); await provider.connect()
+    const result = await provider.push([
+      { entityType: 'todo', entityId: todo.id, operation: 'upsert', payload: todo },
+      { entityType: 'packingBag', entityId: packingBag.id, operation: 'upsert', payload: packingBag },
+      { entityType: 'packingItem', entityId: packingItem.id, operation: 'upsert', payload: packingItem },
+      { entityType: 'packingConfig', entityId: packingConfig.id, operation: 'upsert', payload: packingConfig },
+      { entityType: 'vacay', entityId: vacay.id, operation: 'upsert', payload: vacay },
+    ], 'head-1')
+    expect(result.versions).toMatchObject({ [todo.id]: `${todo.updatedAt}:active`, [packingBag.id]: `${packingBag.updatedAt}:active`, [packingItem.id]: `${packingItem.updatedAt}:active`, [packingConfig.id]: `${packingConfig.updatedAt}:active`, [vacay.id]: `${vacay.updatedAt}:active` })
+    const tree = JSON.parse(String(requests.find(item => item.url.endsWith('/git/trees'))!.init.body)).tree
+    expect(tree.map((entry: { path: string }) => entry.path)).toEqual([`trips/${trip.id}/todos.json`, `trips/${trip.id}/packing.json`, 'vacay/plan.json', 'packing/settings.json', 'manifest.json'])
   })
 })

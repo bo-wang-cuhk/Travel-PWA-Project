@@ -6,7 +6,6 @@ import { useTranslation } from '../../i18n'
 import { getApiErrorMessage } from '../../types'
 import { useToast } from '../shared/Toast'
 import CustomSelect from '../shared/CustomSelect'
-import apiClient from '../../api/client'
 import VacayBadge from './VacayBadge'
 
 /**
@@ -24,12 +23,7 @@ export default function VacaySharedCalendars() {
   const [selectedUser, setSelectedUser] = useState<number | null>(null)
   const [sharing, setSharing] = useState(false)
 
-  const loadAvailable = async () => {
-    try {
-      const data = await apiClient.get('/addons/vacay/shares/available-users').then(r => r.data)
-      setAvailableUsers(data.users)
-    } catch { /* */ }
-  }
+  const loadAvailable = async () => setAvailableUsers([])
 
   const handleShare = async () => {
     if (!selectedUser) return

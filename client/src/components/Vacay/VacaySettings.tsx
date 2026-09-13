@@ -4,7 +4,7 @@ import { useVacayStore } from '../../store/vacayStore'
 import { getIntlLanguage, useTranslation } from '../../i18n'
 import { useToast } from '../shared/Toast'
 import CustomSelect from '../shared/CustomSelect'
-import apiClient from '../../api/client'
+import { localizedVacayCountries } from '../../vacay/countries'
 import { fetchRegionOptions, fetchSchoolHolidayRegionOptions } from './holidayRegions'
 import { SCHOOL_HOLIDAY_COUNTRY_CONFIG } from '../../vacay/schoolHolidayCountries'
 import { windowMonths } from '../../vacay/yearWindow'
@@ -26,16 +26,7 @@ export default function VacaySettings({ onClose }: VacaySettingsProps) {
 
   // Load available countries with localized names
   useEffect(() => {
-    apiClient.get('/addons/vacay/holidays/countries').then(r => {
-      let displayNames
-      try { displayNames = new Intl.DisplayNames([getIntlLanguage(language)], { type: 'region' }) } catch { /* */ }
-      const list = r.data.map(c => ({
-        value: c.countryCode,
-        label: displayNames ? (displayNames.of(c.countryCode) || c.name) : c.name,
-      }))
-      list.sort((a, b) => a.label.localeCompare(b.label))
-      setCountries(list)
-    }).catch(() => {})
+    setCountries(localizedVacayCountries(getIntlLanguage(language)))
   }, [language])
 
   if (!plan) return null

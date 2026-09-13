@@ -8,7 +8,7 @@ import MDancingTrek from '../../../components/MDancingTrek'
 import { useAuthStore } from '../../../../store/authStore'
 import { useAddonStore } from '../../../../store/addonStore'
 import { useTripStore } from '../../../../store/tripStore'
-import { packingApi } from '../../../../api/client'
+import { packingRepo } from '../../../../repo/packingRepo'
 import { useNetworkMode } from '../../../../hooks/useNetworkMode'
 import { useBagTotalsPing } from '../../../../components/Packing/useBagTotalsPing'
 import type { PackingUpdateBagRequest } from '@trek/shared'
@@ -72,7 +72,7 @@ export default function MPackingListTab({ planner }: { planner: TripPlanner }) {
   const reloadBags = useCallback(async () => {
     if (!bagTrackingEnabled) return
     try {
-      const r = await packingApi.listBags(tripId)
+      const r = await packingRepo.listBags(tripId)
       setBags(r.bags || [])
       setUnassignedWeightGrams(r.unassigned_weight_grams ?? null)
     } catch {
@@ -91,11 +91,11 @@ export default function MPackingListTab({ planner }: { planner: TripPlanner }) {
   const { offline } = useNetworkMode()
 
   useEffect(() => {
-    packingApi.listTemplates(tripId).then(r => setTemplates(r.templates || [])).catch(() => {})
+    packingRepo.listTemplates().then(r => setTemplates(r.templates || [])).catch(() => {})
   }, [tripId])
 
   useEffect(() => {
-    packingApi.getCategoryAssignees(tripId).then(r => setCategoryAssignees(r.assignees || {})).catch(() => {})
+    packingRepo.getCategoryAssignees(tripId).then(r => setCategoryAssignees(r.assignees || {})).catch(() => {})
   }, [tripId])
 
   const defaultCategory = t('packing.defaultCategory')
@@ -197,7 +197,7 @@ export default function MPackingListTab({ planner }: { planner: TripPlanner }) {
 
   const createBag = async (name: string): Promise<PackingBag | undefined> => {
     try {
-      const data = await packingApi.createBag(tripId, { name, color: BAG_COLORS[bags.length % BAG_COLORS.length] })
+      const data = await packingRepo.createBag(tripId, { name, color: BAG_COLORS[bags.length % BAG_COLORS.length] })
       setBags(prev => [...prev, data.bag])
       return data.bag
     } catch {
@@ -207,7 +207,7 @@ export default function MPackingListTab({ planner }: { planner: TripPlanner }) {
   }
   const updateBag = async (bagId: number, data: PackingUpdateBagRequest) => {
     try {
-      const result = await packingApi.updateBag(tripId, bagId, data)
+      const result = await packingRepo.updateBag(tripId, bagId, data)
       setBags(prev => prev.map(b => (b.id === bagId ? { ...b, ...result.bag } : b)))
     } catch {
       toast.error(t('common.error'))
@@ -215,7 +215,7 @@ export default function MPackingListTab({ planner }: { planner: TripPlanner }) {
   }
   const deleteBag = async (bagId: number) => {
     try {
-      await packingApi.deleteBag(tripId, bagId)
+      await packingRepo.deleteBag(tripId, bagId)
       setBags(prev => prev.filter(b => b.id !== bagId))
     } catch {
       toast.error(t('packing.toast.deleteError'))
@@ -223,7 +223,7 @@ export default function MPackingListTab({ planner }: { planner: TripPlanner }) {
   }
   const setBagMembers = async (bagId: number, userIds: number[]) => {
     try {
-      const result = await packingApi.setBagMembers(tripId, bagId, userIds)
+      const result = await packingRepo.setBagMembers(tripId, bagId, userIds)
       setBags(prev => prev.map(b => (b.id === bagId ? { ...b, members: result.members } : b)))
     } catch {
       toast.error(t('common.error'))
@@ -232,7 +232,7 @@ export default function MPackingListTab({ planner }: { planner: TripPlanner }) {
 
   const setCategoryAssigneesFor = async (category: string, userIds: number[]) => {
     try {
-      const data = await packingApi.setCategoryAssignees(tripId, category, userIds)
+      const data = await packingRepo.setCategoryAssignees(tripId, category, userIds)
       setCategoryAssignees(prev => ({ ...prev, [category]: data.assignees || [] }))
     } catch {
       toast.error(t('packing.toast.saveError'))
@@ -243,7 +243,7 @@ export default function MPackingListTab({ planner }: { planner: TripPlanner }) {
     try {
       // Land the items in the list the user is looking at — without the
       // visibility the API defaults to 'common' and they vanish from My list.
-      const data = await packingApi.applyTemplate(tripId, templateId, view)
+      const data = await packingRepo.applyTemplate(tripId, templateId, view)
       useTripStore.setState(s => ({ packingItems: [...s.packingItems, ...(data.items || [])] }))
       toast.success(t('packing.templateApplied', { count: data.count }))
       setActionsOpen(false)
@@ -256,12 +256,12 @@ export default function MPackingListTab({ planner }: { planner: TripPlanner }) {
   const saveAsTemplate = async () => {
     if (!saveTemplateName.trim()) return
     try {
-      await packingApi.saveAsTemplate(tripId, saveTemplateName.trim())
+      await packingRepo.saveAsTemplate(tripId, saveTemplateName.trim())
       toast.success(t('packing.templateSaved'))
       setSaveTemplateName('')
       setActionsOpen(false)
       setActionView('menu')
-      packingApi.listTemplates(tripId).then(r => setTemplates(r.templates || [])).catch(() => {})
+      packingRepo.listTemplates().then(r => setTemplates(r.templates || [])).catch(() => {})
     } catch {
       toast.error(t('common.error'))
     }

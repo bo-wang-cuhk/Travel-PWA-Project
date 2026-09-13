@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Package } from 'lucide-react'
-import { packingApi } from '../../api/client'
+import { packingRepo } from '../../repo/packingRepo'
 import { useTripStore } from '../../store/tripStore'
 import { useToast } from '../shared/Toast'
 import { useTranslation } from '../../i18n'
@@ -29,7 +29,7 @@ export default function ApplyTemplateButton({ tripId, visibility, style, classNa
   const { t } = useTranslation()
 
   useEffect(() => {
-    packingApi.listTemplates(tripId).then(d => setTemplates(d.templates || [])).catch(() => {})
+    packingRepo.listTemplates().then(d => setTemplates(d.templates || [])).catch(() => {})
   }, [tripId])
 
   useEffect(() => {
@@ -44,7 +44,7 @@ export default function ApplyTemplateButton({ tripId, visibility, style, classNa
   const handleApply = async (templateId: number) => {
     setApplying(true)
     try {
-      const data = await packingApi.applyTemplate(tripId, templateId, visibility)
+      const data = await packingRepo.applyTemplate(tripId, templateId, visibility)
       useTripStore.setState(s => ({ packingItems: [...s.packingItems, ...(data.items || [])] }))
       toast.success(t('packing.templateApplied', { count: data.count }))
       setOpen(false)

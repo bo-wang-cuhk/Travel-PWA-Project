@@ -74,6 +74,21 @@ export interface GitHubBudgetItemsFile {
   budgetItems: import('../../../domain/budgetSyncModel').SyncedBudgetItem[]
 }
 
+export interface GitHubTodosFile {
+  schemaVersion: 1
+  tripId: string
+  updatedAt: string
+  todos: import('../../../domain/todoSyncModel').SyncedTodo[]
+}
+
+export interface GitHubPackingFile {
+  schemaVersion: 1
+  tripId: string
+  updatedAt: string
+  bags: import('../../../domain/packingSyncModel').SyncedPackingBag[]
+  items: import('../../../domain/packingSyncModel').SyncedPackingItem[]
+}
+
 export interface GitHubManifest {
   schemaVersion: 1
   updatedAt: string
@@ -85,6 +100,11 @@ export interface GitHubManifest {
   accommodations?: Record<string, GitHubManifestAccommodation>
   reservations?: Record<string, GitHubManifestReservation>
   budgetItems?: Record<string, GitHubManifestBudgetItem>
+  todos?: Record<string, GitHubManifestDay>
+  packingBags?: Record<string, GitHubManifestDay>
+  packingItems?: Record<string, GitHubManifestDay>
+  packingConfig?: GitHubManifestTrip
+  vacay?: GitHubManifestTrip
 }
 
 export const EMPTY_MANIFEST: GitHubManifest = {
@@ -97,4 +117,7 @@ export const EMPTY_MANIFEST: GitHubManifest = {
   accommodations: {},
   reservations: {},
   budgetItems: {},
+  todos: {},
+  packingBags: {},
+  packingItems: {},
 }

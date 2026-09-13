@@ -5,6 +5,9 @@ import { applySyncedAssignment, toSyncedAssignment, type LocalAssignmentRecord, 
 import { applySyncedAccommodation, toSyncedAccommodation, type LocalAccommodationRecord, type SyncedAccommodation } from '../domain/accommodationSyncModel'
 import { applySyncedReservation, toSyncedReservation, type LocalReservationRecord, type SyncedReservation } from '../domain/reservationSyncModel'
 import { applySyncedBudgetItem, toSyncedBudgetItem, type LocalBudgetItemRecord, type SyncedBudgetItem } from '../domain/budgetSyncModel'
+import { applySyncedTodo, toSyncedTodo, type LocalTodoRecord, type SyncedTodo } from '../domain/todoSyncModel'
+import { applySyncedPackingBag, applySyncedPackingConfig, applySyncedPackingItem, toSyncedPackingBag, toSyncedPackingConfig, toSyncedPackingItem, type LocalPackingBagRecord, type LocalPackingItemRecord, type SyncedPackingBag, type SyncedPackingConfig, type SyncedPackingItem } from '../domain/packingSyncModel'
+import { applySyncedVacay, toSyncedVacay, VACAY_SYNC_ID, type SyncedVacay } from '../domain/vacaySyncModel'
 import { applySyncedTrip, toSyncedTrip, type SyncedTrip } from '../domain/tripSyncModel'
 import { syncEntityKey } from './localChangeRepository'
 import type { LocalChange, RemoteChange, SyncProvider } from './types'
@@ -31,6 +34,9 @@ async function nextLocalAssignmentId(): Promise<number> {
 async function nextLocalAccommodationId(): Promise<number> { const first = await offlineDb.accommodations.orderBy('id').first(); return first && first.id < 0 ? first.id - 1 : -1 }
 async function nextLocalReservationId(): Promise<number> { const first = await offlineDb.reservations.orderBy('id').first(); return first && first.id < 0 ? first.id - 1 : -1 }
 async function nextLocalBudgetItemId(): Promise<number> { const first = await offlineDb.budgetItems.orderBy('id').first(); return first && first.id < 0 ? first.id - 1 : -1 }
+async function nextLocalTodoId(): Promise<number> { const first = await offlineDb.todoItems.orderBy('id').first(); return first && first.id < 0 ? first.id - 1 : -1 }
+async function nextLocalPackingBagId(): Promise<number> { const first = await offlineDb.packingBags.orderBy('id').first(); return first && first.id < 0 ? first.id - 1 : -1 }
+async function nextLocalPackingItemId(): Promise<number> { const first = await offlineDb.packingItems.orderBy('id').first(); return first && first.id < 0 ? first.id - 1 : -1 }
 
 export interface SyncRunResult {
   pulled: number
@@ -376,6 +382,68 @@ export class SyncManager {
     })
   }
 
+  private async applyRemoteTodo(change: RemoteChange): Promise<'applied' | 'conflict' | 'unchanged'> {
+    const key = syncEntityKey(change.entityType, change.entityId)
+    return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.todoItems, offlineDb.syncOutbox, offlineDb.entitySyncMeta, offlineDb.syncConflicts], async () => {
+      const [meta, pending, local] = await Promise.all([offlineDb.entitySyncMeta.get(key), offlineDb.syncOutbox.get(key), offlineDb.todoItems.where('sync_id').equals(change.entityId).first()])
+      if (meta?.remoteVersion === change.remoteVersion) return 'unchanged'
+      if (pending && pending.status !== 'conflict') { await offlineDb.syncOutbox.update(key, { status: 'conflict', lastError: 'remote changed' }); await offlineDb.entitySyncMeta.put({ key, entityType: 'todo', entityId: change.entityId, status: 'conflict', remoteVersion: meta?.remoteVersion ?? null, lastSyncedAt: meta?.lastSyncedAt ?? null, lastError: 'Both local and remote versions changed' }); await offlineDb.syncConflicts.put({ key, entityType: 'todo', entityId: change.entityId, baseVersion: meta?.remoteVersion ?? null, remoteVersion: change.remoteVersion, localSnapshot: local ? toSyncedTodo(local as LocalTodoRecord) : null, remoteSnapshot: change.payload ?? { deleted: true }, detectedAt: Date.now() }); return 'conflict' }
+      const remote = change.payload as SyncedTodo
+      if (!remote || remote.schemaVersion !== 1 || remote.id !== change.entityId) throw new Error(`Invalid remote todo ${change.entityId}`)
+      if (change.operation === 'delete') { if (local) await offlineDb.todoItems.put({ ...local, deleted_at: remote.deletedAt ?? new Date().toISOString(), updated_at: remote.updatedAt }) }
+      else { const trip = await offlineDb.trips.where('sync_id').equals(remote.tripId).first(); if (!trip || trip.deleted_at) throw new Error(`Todo ${remote.id} has an unavailable trip`); await offlineDb.todoItems.put(applySyncedTodo(remote, local?.id ?? await nextLocalTodoId(), trip.id)) }
+      await offlineDb.entitySyncMeta.put({ key, entityType: 'todo', entityId: change.entityId, status: 'synced', remoteVersion: change.remoteVersion, lastSyncedAt: Date.now(), lastError: null }); await offlineDb.syncConflicts.delete(key); return 'applied'
+    })
+  }
+
+  private async applyRemotePackingBag(change: RemoteChange): Promise<'applied' | 'conflict' | 'unchanged'> {
+    const key = syncEntityKey(change.entityType, change.entityId)
+    return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.packingBags, offlineDb.syncOutbox, offlineDb.entitySyncMeta, offlineDb.syncConflicts], async () => {
+      const [meta, pending, local] = await Promise.all([offlineDb.entitySyncMeta.get(key), offlineDb.syncOutbox.get(key), offlineDb.packingBags.where('sync_id').equals(change.entityId).first()])
+      if (meta?.remoteVersion === change.remoteVersion) return 'unchanged'
+      if (pending && pending.status !== 'conflict') { await offlineDb.syncOutbox.update(key, { status: 'conflict', lastError: 'remote changed' }); await offlineDb.entitySyncMeta.put({ key, entityType: 'packingBag', entityId: change.entityId, status: 'conflict', remoteVersion: meta?.remoteVersion ?? null, lastSyncedAt: meta?.lastSyncedAt ?? null, lastError: 'Both local and remote versions changed' }); await offlineDb.syncConflicts.put({ key, entityType: 'packingBag', entityId: change.entityId, baseVersion: meta?.remoteVersion ?? null, remoteVersion: change.remoteVersion, localSnapshot: local ? toSyncedPackingBag(local as LocalPackingBagRecord) : null, remoteSnapshot: change.payload ?? { deleted: true }, detectedAt: Date.now() }); return 'conflict' }
+      const remote = change.payload as SyncedPackingBag; if (!remote || remote.schemaVersion !== 1 || remote.id !== change.entityId) throw new Error(`Invalid remote packing bag ${change.entityId}`)
+      if (change.operation === 'delete') { if (local) await offlineDb.packingBags.put({ ...local, deleted_at: remote.deletedAt ?? new Date().toISOString(), updated_at: remote.updatedAt }) }
+      else { const trip = await offlineDb.trips.where('sync_id').equals(remote.tripId).first(); if (!trip || trip.deleted_at) throw new Error(`Packing bag ${remote.id} has an unavailable trip`); await offlineDb.packingBags.put(applySyncedPackingBag(remote, local?.id ?? await nextLocalPackingBagId(), trip.id)) }
+      await offlineDb.entitySyncMeta.put({ key, entityType: 'packingBag', entityId: change.entityId, status: 'synced', remoteVersion: change.remoteVersion, lastSyncedAt: Date.now(), lastError: null }); await offlineDb.syncConflicts.delete(key); return 'applied'
+    })
+  }
+
+  private async applyRemotePackingItem(change: RemoteChange): Promise<'applied' | 'conflict' | 'unchanged'> {
+    const key = syncEntityKey(change.entityType, change.entityId)
+    return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.packingBags, offlineDb.packingItems, offlineDb.syncOutbox, offlineDb.entitySyncMeta, offlineDb.syncConflicts], async () => {
+      const [meta, pending, local] = await Promise.all([offlineDb.entitySyncMeta.get(key), offlineDb.syncOutbox.get(key), offlineDb.packingItems.where('sync_id').equals(change.entityId).first()])
+      if (meta?.remoteVersion === change.remoteVersion) return 'unchanged'
+      if (pending && pending.status !== 'conflict') { await offlineDb.syncOutbox.update(key, { status: 'conflict', lastError: 'remote changed' }); await offlineDb.entitySyncMeta.put({ key, entityType: 'packingItem', entityId: change.entityId, status: 'conflict', remoteVersion: meta?.remoteVersion ?? null, lastSyncedAt: meta?.lastSyncedAt ?? null, lastError: 'Both local and remote versions changed' }); await offlineDb.syncConflicts.put({ key, entityType: 'packingItem', entityId: change.entityId, baseVersion: meta?.remoteVersion ?? null, remoteVersion: change.remoteVersion, localSnapshot: local ? toSyncedPackingItem(local as LocalPackingItemRecord) : null, remoteSnapshot: change.payload ?? { deleted: true }, detectedAt: Date.now() }); return 'conflict' }
+      const remote = change.payload as SyncedPackingItem; if (!remote || remote.schemaVersion !== 1 || remote.id !== change.entityId) throw new Error(`Invalid remote packing item ${change.entityId}`)
+      if (change.operation === 'delete') { if (local) await offlineDb.packingItems.put({ ...local, deleted_at: remote.deletedAt ?? new Date().toISOString(), updated_at: remote.updatedAt }) }
+      else { const [trip, bag] = await Promise.all([offlineDb.trips.where('sync_id').equals(remote.tripId).first(), remote.bagId ? offlineDb.packingBags.where('sync_id').equals(remote.bagId).first() : undefined]); if (!trip || trip.deleted_at || (remote.bagId && (!bag || bag.deleted_at || bag.trip_id !== trip.id))) throw new Error(`Packing item ${remote.id} has an unavailable relation`); await offlineDb.packingItems.put(applySyncedPackingItem(remote, local?.id ?? await nextLocalPackingItemId(), trip.id, bag?.id ?? null)) }
+      await offlineDb.entitySyncMeta.put({ key, entityType: 'packingItem', entityId: change.entityId, status: 'synced', remoteVersion: change.remoteVersion, lastSyncedAt: Date.now(), lastError: null }); await offlineDb.syncConflicts.delete(key); return 'applied'
+    })
+  }
+
+  private async applyRemoteVacay(change: RemoteChange): Promise<'applied' | 'conflict' | 'unchanged'> {
+    const key = syncEntityKey(change.entityType, change.entityId)
+    return offlineDb.transaction('rw', [offlineDb.vacayData, offlineDb.syncOutbox, offlineDb.entitySyncMeta, offlineDb.syncConflicts], async () => {
+      const [meta, pending, local] = await Promise.all([offlineDb.entitySyncMeta.get(key), offlineDb.syncOutbox.get(key), offlineDb.vacayData.get(VACAY_SYNC_ID)])
+      if (meta?.remoteVersion === change.remoteVersion) return 'unchanged'
+      if (pending && pending.status !== 'conflict') { await offlineDb.syncOutbox.update(key, { status: 'conflict', lastError: 'remote changed' }); await offlineDb.entitySyncMeta.put({ key, entityType: 'vacay', entityId: change.entityId, status: 'conflict', remoteVersion: meta?.remoteVersion ?? null, lastSyncedAt: meta?.lastSyncedAt ?? null, lastError: 'Both local and remote versions changed' }); await offlineDb.syncConflicts.put({ key, entityType: 'vacay', entityId: change.entityId, baseVersion: meta?.remoteVersion ?? null, remoteVersion: change.remoteVersion, localSnapshot: local ? toSyncedVacay(local) : null, remoteSnapshot: change.payload ?? { deleted: true }, detectedAt: Date.now() }); return 'conflict' }
+      const remote = change.payload as SyncedVacay; if (!remote || remote.schemaVersion !== 1 || remote.id !== VACAY_SYNC_ID) throw new Error('Invalid remote Vacay document')
+      await offlineDb.vacayData.put(applySyncedVacay(remote)); await offlineDb.entitySyncMeta.put({ key, entityType: 'vacay', entityId: change.entityId, status: 'synced', remoteVersion: change.remoteVersion, lastSyncedAt: Date.now(), lastError: null }); await offlineDb.syncConflicts.delete(key); return 'applied'
+    })
+  }
+
+  private async applyRemotePackingConfig(change: RemoteChange): Promise<'applied' | 'conflict' | 'unchanged'> {
+    const key = syncEntityKey(change.entityType, change.entityId)
+    return offlineDb.transaction('rw', [offlineDb.packingConfig, offlineDb.syncOutbox, offlineDb.entitySyncMeta, offlineDb.syncConflicts], async () => {
+      const [meta, pending, local] = await Promise.all([offlineDb.entitySyncMeta.get(key), offlineDb.syncOutbox.get(key), offlineDb.packingConfig.get('personal-packing')])
+      if (meta?.remoteVersion === change.remoteVersion) return 'unchanged'
+      if (pending && pending.status !== 'conflict') { await offlineDb.syncOutbox.update(key, { status: 'conflict', lastError: 'remote changed' }); await offlineDb.entitySyncMeta.put({ key, entityType: 'packingConfig', entityId: change.entityId, status: 'conflict', remoteVersion: meta?.remoteVersion ?? null, lastSyncedAt: meta?.lastSyncedAt ?? null, lastError: 'Both local and remote versions changed' }); await offlineDb.syncConflicts.put({ key, entityType: 'packingConfig', entityId: change.entityId, baseVersion: meta?.remoteVersion ?? null, remoteVersion: change.remoteVersion, localSnapshot: local ? toSyncedPackingConfig(local) : null, remoteSnapshot: change.payload, detectedAt: Date.now() }); return 'conflict' }
+      const remote = change.payload as SyncedPackingConfig; if (!remote || remote.schemaVersion !== 1 || remote.id !== 'personal-packing') throw new Error('Invalid remote packing config')
+      await offlineDb.packingConfig.put(applySyncedPackingConfig(remote)); await offlineDb.entitySyncMeta.put({ key, entityType: 'packingConfig', entityId: change.entityId, status: 'synced', remoteVersion: change.remoteVersion, lastSyncedAt: Date.now(), lastError: null }); await offlineDb.syncConflicts.delete(key); return 'applied'
+    })
+  }
+
   private applyRemote(change: RemoteChange): Promise<'applied' | 'conflict' | 'unchanged'> {
     if (change.entityType === 'day') return this.applyRemoteDay(change)
     if (change.entityType === 'place') return this.applyRemotePlace(change)
@@ -383,6 +451,11 @@ export class SyncManager {
     if (change.entityType === 'accommodation') return this.applyRemoteAccommodation(change)
     if (change.entityType === 'reservation') return this.applyRemoteReservation(change)
     if (change.entityType === 'budgetItem') return this.applyRemoteBudgetItem(change)
+    if (change.entityType === 'todo') return this.applyRemoteTodo(change)
+    if (change.entityType === 'packingBag') return this.applyRemotePackingBag(change)
+    if (change.entityType === 'packingItem') return this.applyRemotePackingItem(change)
+    if (change.entityType === 'packingConfig') return this.applyRemotePackingConfig(change)
+    if (change.entityType === 'vacay') return this.applyRemoteVacay(change)
     return this.applyRemoteTrip(change)
   }
 
@@ -403,7 +476,7 @@ export class SyncManager {
       const remote = await this.provider.pull(previous?.cursor)
       let pulled = 0
       let conflicts = 0
-      const dependencyOrder = { trip: 0, day: 1, place: 2, assignment: 3, accommodation: 4, reservation: 5, budgetItem: 6 } as const
+      const dependencyOrder = { trip: 0, day: 1, place: 2, assignment: 3, accommodation: 4, reservation: 5, budgetItem: 6, todo: 6, packingBag: 6, packingItem: 7, packingConfig: 8, vacay: 8 } as const
       const orderedRemoteChanges = [...remote.changes].sort(
         (a, b) => dependencyOrder[a.entityType] - dependencyOrder[b.entityType],
       )
@@ -463,9 +536,24 @@ export class SyncManager {
           const value = await offlineDb.reservations.where('sync_id').equals(row.entityId).first(); if (!value) continue
           const days = await offlineDb.days.where('trip_id').equals(value.trip_id).toArray()
           changes.push({ entityType: 'reservation', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedReservation(value as LocalReservationRecord, new Map(days.map(day => [day.id, day.sync_id!]))) })
-        } else {
+        } else if (row.entityType === 'budgetItem') {
           const value = await offlineDb.budgetItems.where('sync_id').equals(row.entityId).first(); if (!value) continue
           changes.push({ entityType: 'budgetItem', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedBudgetItem(value as LocalBudgetItemRecord) })
+        } else if (row.entityType === 'todo') {
+          const value = await offlineDb.todoItems.where('sync_id').equals(row.entityId).first(); if (!value) continue
+          changes.push({ entityType: 'todo', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedTodo(value as LocalTodoRecord) })
+        } else if (row.entityType === 'packingBag') {
+          const value = await offlineDb.packingBags.where('sync_id').equals(row.entityId).first(); if (!value) continue
+          changes.push({ entityType: 'packingBag', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedPackingBag(value as LocalPackingBagRecord) })
+        } else if (row.entityType === 'packingItem') {
+          const value = await offlineDb.packingItems.where('sync_id').equals(row.entityId).first(); if (!value) continue
+          changes.push({ entityType: 'packingItem', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedPackingItem(value as LocalPackingItemRecord) })
+        } else if (row.entityType === 'vacay') {
+          const value = await offlineDb.vacayData.get(VACAY_SYNC_ID); if (!value) continue
+          changes.push({ entityType: 'vacay', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedVacay(value) })
+        } else if (row.entityType === 'packingConfig') {
+          const value = await offlineDb.packingConfig.get('personal-packing'); if (!value) continue
+          changes.push({ entityType: 'packingConfig', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedPackingConfig(value) })
         }
       }
       changes.sort((a, b) => dependencyOrder[a.entityType] - dependencyOrder[b.entityType])
