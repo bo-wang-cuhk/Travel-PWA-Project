@@ -5,6 +5,7 @@
  *   N failed     →  red pill    "Failed to sync: N"  (changes were dropped)
  *   N conflicts  →  purple pill "Conflicts: N"       (need resolving)
  *   offline      →  amber pill  "Offline" / "Offline mode" / "Offline · N queued"
+ *                  (plain offline is hidden in standalone personal-PWA mode)
  *   online + N   →  blue pill   "Syncing N…"
  *   online + 0   →  hidden
  *
@@ -17,6 +18,7 @@ import { WifiOff, RefreshCw, AlertTriangle, GitMerge } from 'lucide-react'
 import { mutationQueue } from '../../sync/mutationQueue'
 import { useNetworkMode } from '../../hooks/useNetworkMode'
 import { useTranslation } from '../../i18n'
+import { STANDALONE_MODE } from '../../config/runtimeMode'
 
 const POLL_MS = 3_000
 
@@ -46,7 +48,12 @@ export default function OfflineBanner(): React.ReactElement | null {
     return () => { cancelled = true; clearInterval(id) }
   }, [])
 
-  const hidden = !offline && pendingCount === 0 && failedCount === 0 && conflictCount === 0
+  // Standalone is intentionally "offline" from the legacy TREK Server's point
+  // of view, even while GitHub sync and online services are reachable. A plain
+  // Offline pill is therefore misleading in the personal PWA. Keep actionable
+  // queue failures/conflicts (and queued legacy mutations) visible.
+  const hasActionableState = pendingCount > 0 || failedCount > 0 || conflictCount > 0
+  const hidden = !hasActionableState && (!offline || STANDALONE_MODE)
   if (hidden) return null
 
   // Failed mutations are the most important signal — they mean data was dropped.

@@ -3,6 +3,8 @@ import { screen, waitFor } from '@testing-library/react'
 import { render } from '../../../tests/helpers/render'
 import OfflineBanner from './OfflineBanner'
 
+vi.mock('../../config/runtimeMode', () => ({ STANDALONE_MODE: true }))
+
 vi.mock('../../sync/mutationQueue', () => ({
   mutationQueue: {
     pendingCount: vi.fn(),
@@ -32,7 +34,7 @@ describe('OfflineBanner (B3 surface)', () => {
 
     render(<OfflineBanner />)
 
-    expect(await screen.findByText(/failed to sync: 2/i)).toBeInTheDocument()
+    expect(await screen.findByText(/(?:failed to sync|同步失败).*2/i)).toBeInTheDocument()
   })
 
   it('shows the conflict pill when conflicts exist while online', async () => {
@@ -42,10 +44,10 @@ describe('OfflineBanner (B3 surface)', () => {
 
     render(<OfflineBanner />)
 
-    expect(await screen.findByText(/conflicts: 3/i)).toBeInTheDocument()
+    expect(await screen.findByText(/(?:conflicts|冲突).*3/i)).toBeInTheDocument()
   })
 
-  it('stays hidden when online with nothing pending, failed or conflicting', async () => {
+  it('hides the plain offline pill in standalone mode when there is nothing actionable', async () => {
     pendingCount.mockResolvedValue(0)
     failedCount.mockResolvedValue(0)
     conflictCount.mockResolvedValue(0)
