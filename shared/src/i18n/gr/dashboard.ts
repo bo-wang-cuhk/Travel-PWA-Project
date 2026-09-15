@@ -177,6 +177,7 @@ const dashboard: TranslationStrings = {
   'dashboard.fx.from': 'From', // en-fallback
   'dashboard.fx.to': 'To', // en-fallback
   'dashboard.fx.unavailable': 'Rate unavailable', // en-fallback
+  'dashboard.fx.updatedAt': 'Updated {date}', // en-fallback
   'dashboard.tz.searchPlaceholder': 'Search timezone…', // en-fallback
   'dashboard.tz.empty': 'No other timezones yet — add one with +', // en-fallback
   'dashboard.upcoming.title': 'Upcoming reservations', // en-fallback

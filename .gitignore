@@ -70,3 +70,6 @@ minio-licence.key
 
 .run
 .full-review
+
+# Local Supabase CLI link/runtime metadata
+supabase/.temp/

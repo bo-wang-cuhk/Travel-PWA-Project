@@ -162,6 +162,7 @@ const dashboard: TranslationStrings = {
   'dashboard.fx.from': 'Da',
   'dashboard.fx.to': 'A',
   'dashboard.fx.unavailable': 'Tasso non disponibile',
+  'dashboard.fx.updatedAt': 'Aggiornato il {date}',
   'dashboard.tz.searchPlaceholder': 'Cerca fuso orario…',
   'dashboard.tz.empty': 'Ancora nessun altro fuso orario — aggiungine uno con +',
   'dashboard.upcoming.title': 'Prossime prenotazioni',

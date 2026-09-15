@@ -161,6 +161,7 @@ const dashboard: TranslationStrings = {
   'dashboard.fx.from': 'Dari',
   'dashboard.fx.to': 'Ke',
   'dashboard.fx.unavailable': 'Kurs tidak tersedia',
+  'dashboard.fx.updatedAt': 'Diperbarui {date}',
   'dashboard.tz.searchPlaceholder': 'Cari zona waktu…',
   'dashboard.tz.empty': 'Belum ada zona waktu lain — tambahkan dengan +',
   'dashboard.upcoming.title': 'Reservasi mendatang',

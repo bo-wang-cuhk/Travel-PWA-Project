@@ -62,6 +62,11 @@ describe('tripRepo local IndexedDB data source', () => {
     expect(await offlineDb.syncOutbox.get(`trip:${result.trip.sync_id}`)).toMatchObject({ operation: 'upsert', status: 'pending' })
   })
 
+  it('defaults an omitted trip currency to CNY', async () => {
+    const { trip } = await tripRepo.create({ title: 'Domestic trip' })
+    expect(trip.currency).toBe('CNY')
+  })
+
   it('FE-REPO-TRIP-005: updates only supplied fields and persists them', async () => {
     await offlineDb.trips.put(buildTrip({ id: -1, title: 'Before', currency: 'EUR' }))
     const { trip } = await tripRepo.update(-1, { title: 'After', currency: 'JPY' })

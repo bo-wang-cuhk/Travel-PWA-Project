@@ -36,7 +36,7 @@ import { startConnectivityProbe } from './sync/connectivity'
 import { requestPersistentStorage } from './sync/persistentStorage'
 import ErrorBoundary, { RootErrorFallback } from './components/shared/ErrorBoundary'
 import { installGlobalErrorHandlers } from './utils/globalErrorHandlers'
-import { STANDALONE_MODE, LOCAL_USER, STANDALONE_ADDONS } from './config/runtimeMode'
+import { STANDALONE_MODE, STANDALONE_LOCAL_USER, LOCAL_USER, STANDALONE_ADDONS } from './config/runtimeMode'
 import { useAuthStore } from './store/authStore'
 import { useSettingsStore } from './store/settingsStore'
 import { useAddonStore } from './store/addonStore'
@@ -52,24 +52,28 @@ installGlobalErrorHandlers()
 
 async function bootstrap(): Promise<void> {
   if (STANDALONE_MODE) {
-    useAuthStore.setState({
-      user: LOCAL_USER,
-      isAuthenticated: true,
-      isLoading: false,
-      authCheckFailed: false,
-      loggingOut: false,
-      placesPhotosEnabled: false,
-      placesAutocompleteEnabled: false,
-      placesDetailsEnabled: false,
-      placesEnrichEnabled: false,
-    })
     useSettingsStore.setState({ isLoaded: true })
     // Navigation and trip feature tabs are driven by the add-on catalog. In the
     // server build it comes from /api/addons/enabled; the static GitHub build has
     // no such endpoint, so seed the modules exposed by the personal PWA.
     useAddonStore.setState({ addons: [...STANDALONE_ADDONS], bagTracking: false, loaded: true })
     usePluginStore.setState({ plugins: [], loaded: true })
-    await reopenForUser(LOCAL_USER.id)
+    if (STANDALONE_LOCAL_USER) {
+      useAuthStore.setState({
+        user: LOCAL_USER,
+        isAuthenticated: true,
+        isLoading: false,
+        authCheckFailed: false,
+        loggingOut: false,
+        placesPhotosEnabled: false,
+        placesAutocompleteEnabled: false,
+        placesDetailsEnabled: false,
+        placesEnrichEnabled: false,
+      })
+      await reopenForUser(LOCAL_USER.id)
+    } else {
+      await useAuthStore.getState().loadUser()
+    }
   }
 
   ReactDOM.createRoot(document.getElementById('root')!).render(

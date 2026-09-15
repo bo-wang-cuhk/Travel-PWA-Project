@@ -163,6 +163,7 @@ const dashboard: TranslationStrings = {
   'dashboard.fx.from': 'De',
   'dashboard.fx.to': 'Vers',
   'dashboard.fx.unavailable': 'Taux indisponible',
+  'dashboard.fx.updatedAt': 'Mis à jour le {date}',
   'dashboard.tz.searchPlaceholder': 'Rechercher un fuseau horaire…',
   'dashboard.tz.empty': "Pas encore d'autres fuseaux horaires — ajoutez-en un avec +",
   'dashboard.upcoming.title': 'Prochaines réservations',

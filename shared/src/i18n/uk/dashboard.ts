@@ -174,6 +174,7 @@ const dashboard: TranslationStrings = {
   'dashboard.fx.from': 'З',
   'dashboard.fx.to': 'У',
   'dashboard.fx.unavailable': 'Курс недоступний',
+  'dashboard.fx.updatedAt': 'Оновлено: {date}',
   'dashboard.tz.searchPlaceholder': 'Пошук часового поясу…',
   'dashboard.tz.empty': 'Інших часових поясів поки немає — додайте за допомогою +',
   'dashboard.upcoming.title': 'Найближчі бронювання',

@@ -6,7 +6,7 @@ import { useAuthStore } from '../../../store/authStore'
 import { useTranslation } from '../../../i18n'
 import { useToast } from '../../../components/shared/Toast'
 import { tripsApi } from '../../../api/client'
-import { isWeekend } from '../../../components/Vacay/holidays'
+import { isNonWorkingDay } from '../../../vacay/holidayDayStatus'
 import { currentPeriodYear, inGridWindow, windowMonths } from '../../../vacay/yearWindow'
 import { FALLBACK_PERSON_COLOR, localDateStr, type DayVisualContext } from './vacayDayModel'
 import { getApiErrorMessage, type Trip } from '../../../types'
@@ -31,7 +31,7 @@ export function useMVacay() {
     handleAddNextYear, handleAddPrevYear,
   } = useVacay()
   const {
-    entries, companyHolidays, stats, users, holidays,
+    entries, companyHolidays, stats, users, holidays, holidayDataStates,
     selectedUserId, setSelectedUserId, isFused,
     toggleEntry, toggleCompanyHoliday, updateVacationDays,
     incomingShares, sharedCalendars, setShareHidden, yearSettings,
@@ -57,7 +57,7 @@ export function useMVacay() {
 
   // Default the active person to the current user (same as the persons panel).
   useEffect(() => {
-    if (!selectedUserId && currentUser) setSelectedUserId(currentUser.id)
+    if (selectedUserId == null && currentUser) setSelectedUserId(currentUser.id)
   }, [currentUser, selectedUserId, setSelectedUserId])
 
   // Trip-overlap dots: collect every day of the year covered by an own trip.
@@ -196,29 +196,29 @@ export function useMVacay() {
       await toggleCompanyHoliday(dateStr)
       return
     }
-    if (blockWeekends && isWeekend(dateStr, weekendDays)) {
+    if (blockWeekends && isNonWorkingDay(dateStr, holidays, weekendDays)) {
       // A day already logged when the weekend config changed under it (#1897) keeps
       // counting against the entitlement, so clearing it stays possible — with the
       // entry's own fraction/kind, since the server only allows the delete on a
       // blocked day, not a conversion. Logging a new one stays blocked.
       const own = entryMap[dateStr]?.find(e => e.user_id === (selectedUserId ?? currentUser?.id))
       if (!own) return
-      await toggleEntry(dateStr, selectedUserId || undefined, (own.fraction ?? 1) === 0.5 ? 0.5 : 1, own.kind ?? 'vacation')
+      await toggleEntry(dateStr, selectedUserId ?? undefined, (own.fraction ?? 1) === 0.5 ? 0.5 : 1, own.kind ?? 'vacation')
       return
     }
     if (companyHolidaysEnabled && companyHolidaySet.has(dateStr)) return
-    await toggleEntry(dateStr, selectedUserId || undefined, halfDay ? 0.5 : 1, compDay ? 'comp' : 'vacation')
-  }, [view, months, openMonthSlot, mode, halfDay, compDay, companyHolidaysEnabled, blockWeekends, weekendDays, companyHolidaySet, toggleEntry, toggleCompanyHoliday, selectedUserId, currentUser?.id, entryMap])
+    await toggleEntry(dateStr, selectedUserId ?? undefined, halfDay ? 0.5 : 1, compDay ? 'comp' : 'vacation')
+  }, [view, months, openMonthSlot, mode, halfDay, compDay, companyHolidaysEnabled, blockWeekends, holidays, weekendDays, companyHolidaySet, toggleEntry, toggleCompanyHoliday, selectedUserId, currentUser?.id, entryMap])
 
   // Entitlement stepper: never below what is already used this year
   // (carried-over days cover the difference when used > entitlement).
   const allowInc = useCallback(() => {
-    if (!selectedStat || !selectedUserId) return
+    if (!selectedStat || selectedUserId == null) return
     updateVacationDays(selectedYear, Math.min(365, selectedStat.vacation_days + 1), selectedUserId)
   }, [selectedStat, selectedUserId, selectedYear, updateVacationDays])
 
   const allowDec = useCallback(() => {
-    if (!selectedStat || !selectedUserId) return
+    if (!selectedStat || selectedUserId == null) return
     const min = Math.max(0, selectedStat.used - selectedStat.carried_over)
     if (selectedStat.vacation_days > min) {
       updateVacationDays(selectedYear, selectedStat.vacation_days - 1, selectedUserId)
@@ -246,6 +246,12 @@ export function useMVacay() {
   const goBack = useCallback(() => navigate('/dashboard'), [navigate])
 
   const tripDotColor = users.find(u => u.id === currentUser?.id)?.color || 'var(--m-st-info)'
+  const pendingChinaYears = Object.values(holidayDataStates)
+    .filter(state => state.country === 'CN' && state.status === 'pending')
+    .map(state => state.year)
+  const unavailableChinaYears = Object.values(holidayDataStates)
+    .filter(state => state.country === 'CN' && state.status === 'error')
+    .map(state => state.year)
 
   return {
     loading, plan, selectedYear,
@@ -256,7 +262,7 @@ export function useMVacay() {
     mode, halfDay, setHalfDay, compDay, setCompDay, sheet, setSheet, setMode, setMonthSlot,
     tripDates, tripDotColor,
     blockWeekends, companyHolidaysEnabled, holidaysEnabled, weekStart, weekendDays,
-    dayCtx, monthNamesShort, monthNameLong,
+    dayCtx, monthNamesShort, monthNameLong, pendingChinaYears, unavailableChinaYears,
     selectedUser, selectedColor, selectedStat, selectedUserId, selectPerson,
     handleDayTap, openMonthSlot, allowInc, allowDec,
     prevYear, nextYear, prevMonth, nextMonth, toggleView, goBack,

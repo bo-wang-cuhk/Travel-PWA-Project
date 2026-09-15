@@ -10,6 +10,7 @@ import type { LocalBudgetItemRecord, StoredBudgetItemRecord } from '../domain/bu
 import type { LocalTodoRecord, StoredTodoRecord } from '../domain/todoSyncModel';
 import type { LocalPackingConfigRecord, LocalPackingItemRecord, StoredPackingBagRecord, StoredPackingItemRecord } from '../domain/packingSyncModel';
 import type { LocalVacayRecord } from '../domain/vacaySyncModel';
+import type { HolidayCacheRecord } from '../services/holiday/types';
 import type {
   EntitySyncMetaRecord,
   SyncConflictRecord,
@@ -159,6 +160,7 @@ class TrekOfflineDb extends Dexie {
   packingConfig!: Table<LocalPackingConfigRecord, string>;
   todoItems!: Table<StoredTodoRecord, number>;
   vacayData!: Table<LocalVacayRecord, string>;
+  holidayCache!: Table<HolidayCacheRecord, string>;
   budgetItems!: Table<StoredBudgetItemRecord, number>;
   reservations!: Table<StoredReservationRecord, number>;
   tripFiles!: Table<TripFile, number>;
@@ -553,6 +555,12 @@ class TrekOfflineDb extends Dexie {
     // school-holiday responses remain replaceable online-service caches.
     this.version(13).stores({
       vacayData: 'id, updated_at, deleted_at',
+    });
+
+    // v14: replaceable online-service cache for official Chinese holiday and
+    // makeup-workday exceptions. This is deliberately separate from Vacay sync.
+    this.version(14).stores({
+      holidayCache: 'key, [countryCode+year], status, lastCheckedAt',
     });
   }
 }

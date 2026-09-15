@@ -21,6 +21,8 @@ export interface DayVisual {
   // Colours of the school-holiday calendars covering this day — drawn as a rounded
   // accent band under the number, on top of whatever fill the cell already has.
   school?: string[]
+  /** Official Chinese weekend makeup-workday marker. */
+  makeupWorkday?: boolean
 }
 
 export interface DayVisualContext {
@@ -94,6 +96,7 @@ function baseDayVisual(dateStr: string, dayOfWeek: number, ctx: DayVisualContext
   const holidayMarkers = ctx.holidays[dateStr]
   const holidays = Array.isArray(holidayMarkers) ? holidayMarkers : holidayMarkers ? [holidayMarkers] : []
   const publicHoliday = holidays.find(holiday => (holiday.type ?? 'public_holiday') === 'public_holiday')
+  const makeupWorkday = holidays.find(holiday => holiday.type === 'makeup_workday')
   const schoolColors = holidays.filter(holiday => holiday.type === 'school_holiday').map(holiday => holiday.color)
   // The school band sits on top of any fill (person / company / public), so tag it
   // onto whatever visual this day resolves to rather than picking a single winner.
@@ -132,7 +135,11 @@ function baseDayVisual(dateStr: string, dayOfWeek: number, ctx: DayVisualContext
   if (schoolColors.length > 0) {
     return { background: schoolHolidayWash(schoolColors[0]), numColor: holidayInk(schoolColors[0]), school: schoolColors }
   }
-  if (ctx.weekendDays.includes(dayOfWeek)) {
+  if (makeupWorkday) {
+    return { background: 'transparent', numColor: 'var(--m-muted)', makeupWorkday: true }
+  }
+  const officialOverride = holidays.find(holiday => holiday.isOffDay !== undefined)
+  if (officialOverride?.isOffDay === true || (!officialOverride && ctx.weekendDays.includes(dayOfWeek))) {
     return { background: 'var(--m-ic)', numColor: 'var(--m-faint)' }
   }
   return { background: 'transparent', numColor: 'var(--m-muted)' }

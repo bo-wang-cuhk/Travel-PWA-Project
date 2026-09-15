@@ -5,7 +5,7 @@ import { connect, disconnect } from '../api/websocket'
 import type { User } from '../types'
 import { getApiErrorMessage } from '../types'
 import { tripSyncManager } from '../sync/tripSyncManager'
-import { reopenForUser, deleteCurrentUserDb } from '../db/offlineDb'
+import { reopenForUser, reopenAnonymous, deleteCurrentUserDb } from '../db/offlineDb'
 import { setAuthed } from '../sync/authGate'
 import { registerSyncTriggers, unregisterSyncTriggers } from '../sync/syncTriggers'
 import { useSystemNoticeStore } from './systemNoticeStore.js'
@@ -14,6 +14,8 @@ import { clearAllPluginSessions } from './pluginStore'
 import { forgetStartDestination } from '../utils/startDestination'
 import { forgetServerLanguage } from './settingsStore'
 import { markSignedOut, clearSignedOut } from '../utils/signedOut'
+import { SUPABASE_AUTH_ENABLED } from '../auth/supabaseClient'
+import { loadSupabaseUser, loginWithUsername, logoutSupabase } from '../auth/supabaseAuth'
 
 interface AuthResponse {
   user: User
@@ -104,7 +106,10 @@ async function onAuthSuccess(userId: number): Promise<void> {
   // logout() tears the triggers down, and App's mount effect never runs again in
   // an SPA session, so a second login in the same tab would leave the mutation
   // queue without a flush trigger. Re-registering is a no-op while they are up.
-  registerSyncTriggers()
+  // Supabase Auth only replaces identity/session management in this phase.
+  // The legacy trigger talks to TREK Server and must stay off in the static
+  // PWA; local-first repositories keep handling their own IndexedDB writes.
+  if (!SUPABASE_AUTH_ENABLED) registerSyncTriggers()
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -134,6 +139,19 @@ export const useAuthStore = create<AuthState>()(
     authSequence++
     set({ isLoading: true, error: null })
     try {
+      if (SUPABASE_AUTH_ENABLED) {
+        const data = await loginWithUsername(email, password)
+        set({
+          user: data.user,
+          isAuthenticated: true,
+          loggingOut: false,
+          isLoading: false,
+          authCheckFailed: false,
+          error: null,
+        })
+        await onAuthSuccess(data.user.id)
+        return data
+      }
       const data = await authApi.login({ email, password, remember_me: rememberMe }) as AuthResponse & { mfa_required?: boolean; mfa_token?: string }
       if (data.mfa_required && data.mfa_token) {
         set({ isLoading: false, error: null })
@@ -190,6 +208,7 @@ export const useAuthStore = create<AuthState>()(
     authSequence++
     set({ isLoading: true, error: null })
     try {
+      if (SUPABASE_AUTH_ENABLED) throw new Error('普通用户注册已关闭，请联系管理员创建账号')
       const data = await authApi.register({ username, email, password, invite_token })
       set({
         user: data.user,
@@ -241,8 +260,10 @@ export const useAuthStore = create<AuthState>()(
     // browser language is one TREK ships, so otherwise the next user here stays
     // in the previous account's language, launch after launch.
     forgetServerLanguage()
-    // 4. Tell server to clear the httpOnly cookie (best-effort).
-    await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {})
+    // 4. End the active identity session. Supabase owns its refresh token;
+    // the legacy server build still clears its httpOnly cookie here.
+    if (SUPABASE_AUTH_ENABLED) await logoutSupabase().catch(() => {})
+    else await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {})
     // 5. Clear service worker caches containing sensitive data.
     if ('caches' in window) {
       await Promise.all([
@@ -250,8 +271,10 @@ export const useAuthStore = create<AuthState>()(
         caches.delete('user-uploads').catch(() => {}),
       ])
     }
-    // 6. Delete this user's scoped IndexedDB and return to the anonymous DB.
-    await deleteCurrentUserDb().catch(console.error)
+    // 6. Supabase logout preserves the user's local-first working database; it
+    // is merely detached until that same UUID-backed profile signs in again.
+    if (SUPABASE_AUTH_ENABLED) await reopenAnonymous().catch(console.error)
+    else await deleteCurrentUserDb().catch(console.error)
     // 7. Finish clearing auth state.
     set({
       user: null,
@@ -266,6 +289,19 @@ export const useAuthStore = create<AuthState>()(
     const silent = !!opts?.silent
     if (!silent) set({ isLoading: true })
     try {
+      if (SUPABASE_AUTH_ENABLED) {
+        const user = await loadSupabaseUser()
+        if (seq !== authSequence) return
+        set({
+          user,
+          isAuthenticated: true,
+          loggingOut: false,
+          isLoading: false,
+          authCheckFailed: false,
+        })
+        await onAuthSuccess(user.id)
+        return
+      }
       const data = await authApi.me()
       if (seq !== authSequence) return // stale response — a login/register happened meanwhile
       set({
@@ -423,9 +459,12 @@ export const useAuthStore = create<AuthState>()(
       isAuthenticated: state.isAuthenticated,
       user: state.user ? {
         id: state.user.id,
+        auth_id: state.user.auth_id,
         username: state.user.username,
+        display_name: state.user.display_name,
         email: state.user.email,
         role: state.user.role,
+        status: state.user.status,
         avatar_url: state.user.avatar_url,
         mfa_enabled: state.user.mfa_enabled,
         must_change_password: state.user.must_change_password,

@@ -8,6 +8,7 @@ import type {
 import { isSchoolHolidayCountrySupported } from '../vacay/schoolHolidayCountries'
 import { DEFAULT_YEAR_SETTINGS, defaultPeriodYear, inGridWindow, windowCalendarYears } from '../vacay/yearWindow'
 import type { VacayYearSettingsRequest } from '@trek/shared'
+import type { HolidayDataStatus } from '../services/holiday/types'
 
 interface PendingInvite {
   user_id: number
@@ -47,6 +48,21 @@ interface VacayHolidayRaw {
   localName: string
   global: boolean
   counties: string[] | null
+  isOffDay?: boolean
+}
+
+export interface VacayHolidayYearState {
+  country: string
+  year: number
+  status: HolidayDataStatus
+  source: string
+  fetchedAt: string | null
+  lastCheckedAt: string | null
+  error: string | null
+}
+
+interface VacayHolidayResponse extends Omit<VacayHolidayYearState, 'country' | 'year'> {
+  holidays: VacayHolidayRaw[]
 }
 
 interface VacaySchoolHolidayRaw {
@@ -72,7 +88,7 @@ interface VacayApi {
   toggleCompanyHoliday: (date: string) => Promise<unknown>
   getStats: (year: number) => Promise<VacayStatsResponse>
   updateStats: (year: number, days: number, targetUserId?: number) => Promise<unknown>
-  getHolidays: (year: number, country: string) => Promise<VacayHolidayRaw[]>
+  getHolidays: (year: number, country: string) => Promise<VacayHolidayResponse>
   getSchoolHolidays: (year: number, country: string, subdivision?: string | null, group?: string | null) => Promise<VacaySchoolHolidayRaw[]>
   addHolidayCalendar: (data: { region: string; color?: string; label?: string | null; type?: 'public_holiday' | 'school_holiday' }) => Promise<{ calendar: VacayHolidayCalendar }>
   updateHolidayCalendar: (id: number, data: { region?: string; color?: string; label?: string | null; type?: 'public_holiday' | 'school_holiday' }) => Promise<{ calendar: VacayHolidayCalendar }>
@@ -144,6 +160,7 @@ interface VacayState {
   selectedYear: number
   selectedUserId: number | null
   holidays: HolidaysMap
+  holidayDataStates: Record<string, VacayHolidayYearState>
   loading: boolean
   outgoingShares: VacayShareOutgoing[]
   incomingShares: VacayShareIncoming[]
@@ -198,6 +215,7 @@ export const useVacayStore = create<VacayState>((set, get) => ({
   selectedYear: new Date().getFullYear(),
   selectedUserId: null,
   holidays: {},
+  holidayDataStates: {},
   loading: false,
   outgoingShares: [],
   incomingShares: [],
@@ -360,10 +378,11 @@ export const useVacayStore = create<VacayState>((set, get) => ({
       ((cal.type ?? 'public_holiday') === 'public_holiday' && plan?.holidays_enabled)
     )
     if (enabledCalendars.length === 0) {
-      set({ holidays: {} })
+      set({ holidays: {}, holidayDataStates: {} })
       return
     }
     const map: HolidaysMap = {}
+    const holidayDataStates: Record<string, VacayHolidayYearState> = {}
     const settings = get().yearSettings
     // A shifted leave year (#737) spans two calendar years and the holiday APIs are
     // per calendar year, so each one the window touches is fetched and the result
@@ -384,20 +403,29 @@ export const useVacayStore = create<VacayState>((set, get) => ({
               })
             })
           } else {
-            const data = await api.getHolidays(cy, country)
+            const response = await api.getHolidays(cy, country)
+            const data = response.holidays
+            holidayDataStates[`${country}-${cy}`] = {
+              country, year: cy, status: response.status, source: response.source,
+              fetchedAt: response.fetchedAt, lastCheckedAt: response.lastCheckedAt, error: response.error,
+            }
             const hasRegions = data.some((h: VacayHolidayRaw) => h.counties && h.counties.length > 0)
             if (hasRegions && !subdivision) continue
             data.forEach((h: VacayHolidayRaw) => {
               if (!inGridWindow(h.date, y, settings)) return
               if (h.global || !h.counties || (subdivision && h.counties.includes(subdivision))) {
-                pushHolidayMarker(map, h.date, { name: h.name, localName: h.localName, color: cal.color, label: cal.label, type: 'public_holiday' })
+                pushHolidayMarker(map, h.date, {
+                  name: h.name, localName: h.localName, color: cal.color, label: cal.label,
+                  type: h.isOffDay === false ? 'makeup_workday' : 'public_holiday',
+                  isOffDay: h.isOffDay,
+                })
               }
             })
           }
         } catch { /* API error, skip */ }
       }
     }
-    set({ holidays: map })
+    set({ holidays: map, holidayDataStates })
   },
 
   addHolidayCalendar: async (data) => {

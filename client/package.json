@@ -40,6 +40,7 @@
     "@mapbox/mapbox-gl-rtl-text": "^0.4.0",
     "@maplibre/maplibre-gl-leaflet": "0.1.4",
     "@simplewebauthn/browser": "^13.1.2",
+    "@supabase/supabase-js": "^2.116.0",
     "@trek/shared": "*",
     "axios": "^1.6.7",
     "dexie": "^4.4.2",

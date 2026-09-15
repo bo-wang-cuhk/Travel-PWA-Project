@@ -9,6 +9,8 @@ import { getApiErrorMessage } from '../../types'
 import { useToast } from '../../components/shared/Toast'
 import { managedAdminTabs } from '../../managed'
 import type { AdminUser, AdminStats, OidcConfig, UpdateInfo } from './adminModel'
+import { SUPABASE_AUTH_ENABLED } from '../../auth/supabaseClient'
+import { supabaseAdminApi } from '../../auth/supabaseAdminApi'
 
 /**
  * Every tab id AdminPage can render a panel for, whatever this install offers.
@@ -77,9 +79,13 @@ export function useAdmin() {
   const [stats, setStats] = useState<AdminStats | null>(null)
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null)
-  const [editForm, setEditForm] = useState<{ username: string; email: string; role: string; password: string }>({ username: '', email: '', role: 'user', password: '' })
+  const [editForm, setEditForm] = useState<{ username: string; display_name?: string; email: string; role: string; password: string }>({
+    username: '', ...(SUPABASE_AUTH_ENABLED ? { display_name: '' } : {}), email: '', role: 'user', password: '',
+  })
   const [showCreateUser, setShowCreateUser] = useState<boolean>(false)
-  const [createForm, setCreateForm] = useState<{ username: string; email: string; password: string; role: string }>({ username: '', email: '', password: '', role: 'user' })
+  const [createForm, setCreateForm] = useState<{ username: string; display_name?: string; email: string; password: string; role: string }>({
+    username: '', ...(SUPABASE_AUTH_ENABLED ? { display_name: '' } : {}), email: '', password: '', role: 'user',
+  })
 
   // Bag tracking
   const [bagTrackingEnabled, setBagTrackingEnabled] = useState<boolean>(false)
@@ -185,6 +191,14 @@ export function useAdmin() {
   const loadData = async () => {
     setIsLoading(true)
     try {
+      if (SUPABASE_AUTH_ENABLED) {
+        const usersData = await supabaseAdminApi.users() as { users: AdminUser[] }
+        setUsers(usersData.users)
+        setStats({ totalUsers: usersData.users.length, totalTrips: 0, totalPlaces: 0, totalFiles: 0 })
+        setInvites([])
+        setInviteTrips([])
+        return
+      }
       const [usersData, statsData, invitesData, inviteTripsData] = await Promise.all([
         adminApi.users(),
         adminApi.stats(),
@@ -319,19 +333,23 @@ export function useAdmin() {
   }
 
   const handleCreateUser = async () => {
-    if (!createForm.username.trim() || !createForm.email.trim() || !createForm.password.trim()) {
+    const identityFieldReady = SUPABASE_AUTH_ENABLED ? createForm.display_name?.trim() : createForm.email.trim()
+    if (!createForm.username.trim() || !identityFieldReady || !createForm.password.trim()) {
       toast.error(t('admin.toast.fieldsRequired'))
       return
     }
-    if (createForm.password.trim().length < 8) {
+    const minimumPasswordLength = SUPABASE_AUTH_ENABLED ? 6 : 8
+    if (createForm.password.trim().length < minimumPasswordLength) {
       toast.error(t('settings.passwordTooShort'))
       return
     }
     try {
-      const data = await adminApi.createUser(createForm)
+      const data = SUPABASE_AUTH_ENABLED
+        ? await supabaseAdminApi.createUser(createForm) as { user: AdminUser }
+        : await adminApi.createUser(createForm)
       setUsers(prev => [data.user, ...prev])
       setShowCreateUser(false)
-      setCreateForm({ username: '', email: '', password: '', role: 'user' })
+      setCreateForm({ username: '', ...(SUPABASE_AUTH_ENABLED ? { display_name: '' } : {}), email: '', password: '', role: 'user' })
       toast.success(t('admin.toast.userCreated'))
     } catch (err: unknown) {
       toast.error(getApiErrorMessage(err, t('admin.toast.createError')))
@@ -373,17 +391,24 @@ export function useAdmin() {
 
   const handleEditUser = (user) => {
     setEditingUser(user)
-    setEditForm({ username: user.username, email: user.email, role: user.role, password: '' })
+    setEditForm({
+      username: user.username,
+      ...(SUPABASE_AUTH_ENABLED ? { display_name: user.display_name || user.username } : {}),
+      email: user.email,
+      role: user.role,
+      password: '',
+    })
   }
 
   const handleSaveUser = async () => {
     if (!editingUser) return
     try {
-      const payload: { username?: string; email?: string; role: string; password?: string } = {
+      const payload: { username?: string; display_name?: string; email?: string; role: string; password?: string } = {
         username: editForm.username.trim() || undefined,
         email: editForm.email.trim() || undefined,
         role: editForm.role,
       }
+      if (SUPABASE_AUTH_ENABLED) payload.display_name = editForm.display_name?.trim() || undefined
       if (editForm.password.trim()) {
         if (editForm.password.trim().length < 8) {
           toast.error(t('settings.passwordTooShort'))
@@ -391,7 +416,9 @@ export function useAdmin() {
         }
         payload.password = editForm.password.trim()
       }
-      const data = await adminApi.updateUser(editingUser.id, payload)
+      const data = SUPABASE_AUTH_ENABLED
+        ? await supabaseAdminApi.updateUser(editingUser.id, payload) as { user: AdminUser }
+        : await adminApi.updateUser(editingUser.id, payload)
       setUsers(prev => prev.map(u => u.id === editingUser.id ? data.user : u))
       setEditingUser(null)
       toast.success(t('admin.toast.userUpdated'))
@@ -407,7 +434,8 @@ export function useAdmin() {
     }
     if (!confirm(t('admin.deleteUser', { name: user.username }))) return
     try {
-      await adminApi.deleteUser(user.id)
+      if (SUPABASE_AUTH_ENABLED) await supabaseAdminApi.deleteUser(user.id)
+      else await adminApi.deleteUser(user.id)
       setUsers(prev => prev.filter(u => u.id !== user.id))
       toast.success(t('admin.toast.userDeleted'))
     } catch (err: unknown) {
@@ -418,6 +446,7 @@ export function useAdmin() {
   return {
     // store-derived
     demoMode, serverTimezone, hour12, mcpEnabled, devMode, managed, currentUser,
+    supabaseAuthEnabled: SUPABASE_AUTH_ENABLED,
     updateApiKeys, setAppRequireMfa, setTripRemindersEnabled,
     setPlacesPhotosEnabled, setPlacesAutocompleteEnabled, setPlacesDetailsEnabled, setPlacesEnrichEnabled, logout,
     navigate, toast,

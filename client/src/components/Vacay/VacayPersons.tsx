@@ -23,7 +23,7 @@ export default function VacayPersons() {
 
   // Default selectedUserId to current user
   useEffect(() => {
-    if (!selectedUserId && currentUser) setSelectedUserId(currentUser.id)
+    if (selectedUserId == null && currentUser) setSelectedUserId(currentUser.id)
   }, [currentUser, selectedUserId, setSelectedUserId])
   const [showInvite, setShowInvite] = useState(false)
   const [showColorPicker, setShowColorPicker] = useState(false)

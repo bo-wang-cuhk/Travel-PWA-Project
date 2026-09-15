@@ -161,6 +161,7 @@ const dashboard: TranslationStrings = {
   'dashboard.fx.from': 'Van',
   'dashboard.fx.to': 'Naar',
   'dashboard.fx.unavailable': 'Koers niet beschikbaar',
+  'dashboard.fx.updatedAt': 'Bijgewerkt op {date}',
   'dashboard.tz.searchPlaceholder': 'Tijdzone zoeken…',
   'dashboard.tz.empty': 'Nog geen andere tijdzones — voeg er een toe met +',
   'dashboard.upcoming.title': 'Aankomende reserveringen',

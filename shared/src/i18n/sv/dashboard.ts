@@ -173,6 +173,7 @@ const dashboard: TranslationStrings = {
   'dashboard.fx.from': 'Från',
   'dashboard.fx.to': 'Till',
   'dashboard.fx.unavailable': 'Pris ej tillgängligt',
+  'dashboard.fx.updatedAt': 'Uppdaterad {date}',
   'dashboard.tz.searchPlaceholder': 'Sök efter tidszon…',
   'dashboard.tz.empty': 'Inga andra tidszoner än så länge — lägg till en med +',
   'dashboard.upcoming.title': 'Kommande bokningar',

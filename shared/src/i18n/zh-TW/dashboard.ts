@@ -158,6 +158,7 @@ const dashboard: TranslationStrings = {
   'dashboard.fx.from': '從',
   'dashboard.fx.to': '到',
   'dashboard.fx.unavailable': '無法取得匯率',
+  'dashboard.fx.updatedAt': '更新於 {date}',
   'dashboard.tz.searchPlaceholder': '搜尋時區…',
   'dashboard.tz.empty': '還沒有其他時區 — 用 + 新增一個',
   'dashboard.upcoming.title': '即將到來的預訂',

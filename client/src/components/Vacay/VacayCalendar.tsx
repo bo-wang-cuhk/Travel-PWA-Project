@@ -2,7 +2,7 @@ import { useMemo, useState, useCallback, useEffect } from 'react'
 import { useVacayStore } from '../../store/vacayStore'
 import { useAuthStore } from '../../store/authStore'
 import { useTranslation } from '../../i18n'
-import { isWeekend } from './holidays'
+import { isNonWorkingDay } from '../../vacay/holidayDayStatus'
 import { inGridWindow, windowMonths } from '../../vacay/yearWindow'
 import { tripsApi } from '../../api/client'
 import VacayMonthCard from './VacayMonthCard'
@@ -15,7 +15,7 @@ export type SharedDayMark = { color: string; name: string; fraction?: number; co
 
 export default function VacayCalendar() {
   const { t, locale } = useTranslation()
-  const { selectedYear, selectedUserId, entries, companyHolidays, toggleEntry, toggleCompanyHoliday, plan, users, holidays, sharedCalendars, yearSettings } = useVacayStore()
+  const { selectedYear, selectedUserId, entries, companyHolidays, toggleEntry, toggleCompanyHoliday, plan, users, holidays, holidayDataStates, sharedCalendars, yearSettings } = useVacayStore()
   const currentUserId = useAuthStore(s => s.user?.id)
   const [mode, setMode] = useState<VacayMode>('vacation')
   // Half-day is a per-person modifier on the vacation action, not a mode: with it
@@ -94,7 +94,7 @@ export default function VacayCalendar() {
       await toggleCompanyHoliday(dateStr)
       return
     }
-    if (blockWeekends && isWeekend(dateStr, weekendDays)) {
+    if (blockWeekends && isNonWorkingDay(dateStr, holidays, weekendDays)) {
       // A day already logged when the weekend config changed under it (#1897) keeps
       // counting against the entitlement, so clearing it stays possible — with the
       // entry's own fraction/kind, since the server only allows the delete on a
@@ -106,7 +106,7 @@ export default function VacayCalendar() {
     }
     if (companyHolidaysEnabled && companyHolidaySet.has(dateStr)) return
     await toggleEntry(dateStr, selectedUserId || undefined, halfDay ? 0.5 : 1, compDay ? 'comp' : 'vacation')
-  }, [mode, halfDay, compDay, toggleEntry, toggleCompanyHoliday, companyHolidaySet, blockWeekends, weekendDays, companyHolidaysEnabled, selectedUserId, currentUserId, entryMap])
+  }, [mode, halfDay, compDay, toggleEntry, toggleCompanyHoliday, companyHolidaySet, blockWeekends, holidays, weekendDays, companyHolidaysEnabled, selectedUserId, currentUserId, entryMap])
 
   // Cells with a half day or a shared overlay report a hover, so the tooltip
   // appears exactly when there's something to explain. Fixed-positioned at the
@@ -126,6 +126,12 @@ export default function VacayCalendar() {
   const tipHolidayRaw = tip ? holidays[tip.date] : undefined
   const tipSchool = (Array.isArray(tipHolidayRaw) ? tipHolidayRaw : tipHolidayRaw ? [tipHolidayRaw] : []).filter(h => h.type === 'school_holiday')
   const tipDate = tip ? new Intl.DateTimeFormat(locale, { weekday: 'short', day: 'numeric', month: 'long' }).format(new Date(tip.date + 'T00:00:00')) : ''
+  const pendingChinaYears = Object.values(holidayDataStates)
+    .filter(state => state.country === 'CN' && state.status === 'pending')
+    .map(state => state.year)
+  const unavailableChinaYears = Object.values(holidayDataStates)
+    .filter(state => state.country === 'CN' && state.status === 'error')
+    .map(state => state.year)
 
   // Label for a day's leave type + fraction (#552/#1074): full/half vacation or comp/flex.
   const dayTypeLabel = (fraction: number | undefined, kind: string | undefined) => {
@@ -136,6 +142,20 @@ export default function VacayCalendar() {
 
   return (
     <div>
+      {pendingChinaYears.length > 0 && (
+        <div className="mb-3 rounded-xl px-3 py-2 text-xs" style={{ background: 'var(--vg-surf2)', color: 'var(--vg-ink3)' }}>
+          {locale.startsWith('zh')
+            ? `中国大陆 ${pendingChinaYears.join('、')} 年节假日及调休安排尚未公布`
+            : `Mainland China holiday and makeup-workday arrangements for ${pendingChinaYears.join(', ')} are not published yet.`}
+        </div>
+      )}
+      {unavailableChinaYears.length > 0 && (
+        <div className="mb-3 rounded-xl px-3 py-2 text-xs" style={{ background: 'var(--vg-surf2)', color: 'var(--vg-ink3)' }}>
+          {locale.startsWith('zh')
+            ? `中国大陆 ${unavailableChinaYears.join('、')} 年节假日数据当前不可用`
+            : `Mainland China holiday data for ${unavailableChinaYears.join(', ')} is currently unavailable.`}
+        </div>
+      )}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-[18px]" style={{ paddingBottom: 'calc(var(--bottom-nav-h, 0px) + 80px)' }}>
         {/* Twelve months from the window start (#737), rolling over the calendar
             year when the leave year is shifted — Jul 2026 – Jun 2027 and so on. */}

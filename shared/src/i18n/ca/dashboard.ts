@@ -134,6 +134,7 @@ const dashboard: TranslationStrings = {
   'dashboard.fx.from': 'De',
   'dashboard.fx.to': 'A',
   'dashboard.fx.unavailable': 'Tipus de canvi no disponible',
+  'dashboard.fx.updatedAt': 'Actualitzat el {date}',
   'dashboard.tz.searchPlaceholder': 'Cerca un fus horari…',
   'dashboard.tz.empty': 'Encara no hi ha altres fusos horaris — afegeix-ne un amb +',
   'dashboard.upcoming.title': 'Properes reserves',

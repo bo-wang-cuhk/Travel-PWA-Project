@@ -2,9 +2,12 @@
 
 export interface AdminUser {
   id: number
+  auth_id?: string
   username: string
+  display_name?: string
   email: string
   role: 'admin' | 'user'
+  status?: 'active' | 'disabled'
   created_at: string
   last_login?: string | null
   online?: boolean

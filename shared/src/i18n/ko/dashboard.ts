@@ -173,6 +173,7 @@ const dashboard: TranslationStrings = {
   'dashboard.fx.from': '보낼 통화',
   'dashboard.fx.to': '받을 통화',
   'dashboard.fx.unavailable': '환율을 사용할 수 없음',
+  'dashboard.fx.updatedAt': '업데이트: {date}',
   'dashboard.tz.searchPlaceholder': '시간대 검색…',
   'dashboard.tz.empty': '다른 시간대가 아직 없습니다 — +로 추가하세요',
   'dashboard.upcoming.title': '예정된 예약',

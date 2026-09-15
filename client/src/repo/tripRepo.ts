@@ -69,7 +69,7 @@ function tripFromCreate(
     description: data.description ?? null,
     start_date: data.start_date ?? null,
     end_date: data.end_date ?? null,
-    currency: data.currency ?? 'EUR',
+    currency: data.currency ?? 'CNY',
     cover_image: null,
     is_archived: 0,
     reminder_days: data.reminder_days ?? 3,

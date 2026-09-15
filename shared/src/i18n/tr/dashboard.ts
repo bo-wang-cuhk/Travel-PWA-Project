@@ -174,6 +174,7 @@ const dashboard: TranslationStrings = {
   'dashboard.fx.from': 'Kaynak',
   'dashboard.fx.to': 'Hedef',
   'dashboard.fx.unavailable': 'Kur kullanılamıyor',
+  'dashboard.fx.updatedAt': 'Güncelleme: {date}',
   'dashboard.tz.searchPlaceholder': 'Saat dilimi ara…',
   'dashboard.tz.empty': 'Henüz başka saat dilimi yok — + ile bir tane ekleyin',
   'dashboard.upcoming.title': 'Yaklaşan rezervasyonlar',

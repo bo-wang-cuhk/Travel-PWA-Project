@@ -167,6 +167,7 @@ const dashboard: TranslationStrings = {
   'dashboard.fx.from': 'Từ',
   'dashboard.fx.to': 'ĐẾN',
   'dashboard.fx.unavailable': 'Không có giá',
+  'dashboard.fx.updatedAt': 'Cập nhật: {date}',
   'dashboard.tz.searchPlaceholder': 'Tìm kiếm múi giờ…',
   'dashboard.tz.empty': 'Chưa có múi giờ nào khác — thêm một múi giờ bằng +',
   'dashboard.upcoming.title': 'Đặt chỗ sắp tới',

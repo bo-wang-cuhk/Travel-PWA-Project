@@ -1,5 +1,5 @@
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { visualizer } from 'rollup-plugin-visualizer';
 import { rtlTextAlias } from './rtlTextAlias.js';
@@ -12,8 +12,18 @@ const basePath = process.env.VITE_BASE_PATH || '/';
 // `npm run build:analyze` writes dist/stats.html — a treemap of what actually ended
 // up in each chunk. The plain build only reports chunk sizes, which tells you a chunk
 // is too big but not which dependency made it so.
-export default defineConfig(({ mode }) => ({
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '');
+  // Only these two browser-safe Supabase values are exposed. Secret/service-role
+  // keys and database passwords are intentionally never copied into the bundle.
+  const publicSupabaseEnv = {
+    'import.meta.env.SUPABASE_URL': JSON.stringify(env.SUPABASE_URL || ''),
+    'import.meta.env.SUPABASE_PUBLISHABLE_KEY': JSON.stringify(env.SUPABASE_PUBLISHABLE_KEY || ''),
+  };
+
+  return ({
   base: basePath,
+  define: publicSupabaseEnv,
   plugins: [
     react(),
     mode === 'analyze' &&
@@ -357,4 +367,5 @@ export default defineConfig(({ mode }) => ({
       },
     },
   },
-}));
+  });
+});

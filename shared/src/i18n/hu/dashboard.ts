@@ -162,6 +162,7 @@ const dashboard: TranslationStrings = {
   'dashboard.fx.from': 'Erről',
   'dashboard.fx.to': 'Erre',
   'dashboard.fx.unavailable': 'Árfolyam nem elérhető',
+  'dashboard.fx.updatedAt': 'Frissítve: {date}',
   'dashboard.tz.searchPlaceholder': 'Időzóna keresése…',
   'dashboard.tz.empty': 'Még nincs több időzóna — adj hozzá egyet a + gombbal',
   'dashboard.upcoming.title': 'Közelgő foglalások',

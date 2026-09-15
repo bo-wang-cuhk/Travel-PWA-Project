@@ -40,6 +40,8 @@ jobs:
         env:
           VITE_STANDALONE_MODE: 'true'
           VITE_BASE_PATH: '/Travel-PWA-Project/'
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
         run: npm run build --workspace=client
 
       - name: Add GitHub Pages SPA fallback

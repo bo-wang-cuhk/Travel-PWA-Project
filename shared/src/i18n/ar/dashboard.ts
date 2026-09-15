@@ -129,6 +129,7 @@ const dashboard: TranslationStrings = {
   'dashboard.fx.from': 'من',
   'dashboard.fx.to': 'إلى',
   'dashboard.fx.unavailable': 'السعر غير متاح',
+  'dashboard.fx.updatedAt': 'تم التحديث في {date}',
   'dashboard.tz.searchPlaceholder': 'ابحث عن منطقة زمنية…',
   'dashboard.tz.empty': 'لا توجد مناطق زمنية أخرى بعد — أضف واحدة بالزر +',
   'dashboard.upcoming.title': 'الحجوزات القادمة',

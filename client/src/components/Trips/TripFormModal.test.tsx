@@ -385,17 +385,18 @@ describe('TripFormModal', () => {
     expect(screen.getByText(/^RUB/)).toBeInTheDocument();
   });
 
-  it('FE-COMP-TRIPFORM-033: defaults a new trip to EUR and sends the currency on save', async () => {
+  it('FE-COMP-TRIPFORM-033: defaults a new trip to CNY and sends the currency on save', async () => {
     const user = userEvent.setup();
     const onSave = vi.fn().mockResolvedValue({ trip: buildTrip({ id: 99 }) });
     render(<TripFormModal {...defaultProps} onSave={onSave} />);
 
-    await user.type(screen.getByPlaceholderText(/Summer in Japan/i), 'Moscow 2026');
-    const submitBtn = screen.getAllByText('Create New Trip').find(el => el.closest('button'))!;
-    await user.click(submitBtn.closest('button')!);
+    const titleInput = document.querySelector('form input[type="text"][required]') as HTMLInputElement;
+    const submitBtn = screen.getByRole('button', { name: /Create New Trip|创建新旅行/i });
+    await user.type(titleInput, 'Moscow 2026');
+    await user.click(submitBtn);
 
     await waitFor(() => expect(onSave).toHaveBeenCalled());
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ currency: 'EUR' }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ currency: 'CNY' }));
   });
 
   it('FE-COMP-TRIPFORM-033b: a new trip defaults to the user\'s default_currency (#1784)', async () => {

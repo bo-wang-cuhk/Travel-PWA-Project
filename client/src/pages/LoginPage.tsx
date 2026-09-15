@@ -79,6 +79,7 @@ export default function LoginPage(): React.ReactElement {
     noRedirect,
     showRegisterOption,
     oidcOnly,
+    supabaseAuthEnabled,
     handleDemoLogin,
     handleSubmit,
     handlePasskeyLogin,
@@ -808,7 +809,7 @@ export default function LoginPage(): React.ReactElement {
                     </div>
                   )}
 
-                  {/* Email */}
+                  {/* Existing TREK field, backed by username lookup in Supabase mode. */}
                   {!(mode === 'login' && mfaStep) && !passwordChangeStep && (
                     <div>
                       <label
@@ -820,10 +821,10 @@ export default function LoginPage(): React.ReactElement {
                           marginBottom: 6,
                         }}
                       >
-                        {t('common.email')}
+                        {supabaseAuthEnabled ? t('login.username') : t('common.email')}
                       </label>
                       <div style={{ position: 'relative' }}>
-                        <Mail
+                        {supabaseAuthEnabled ? <User
                           size={15}
                           className="text-[#9ca3af]"
                           style={{
@@ -833,13 +834,17 @@ export default function LoginPage(): React.ReactElement {
                             transform: 'translateY(-50%)',
                             pointerEvents: 'none',
                           }}
-                        />
+                        /> : <Mail
+                          size={15}
+                          className="text-[#9ca3af]"
+                          style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}
+                        />}
                         <input
-                          type="email"
+                          type={supabaseAuthEnabled ? 'text' : 'email'}
                           value={email}
                           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
                           required
-                          placeholder={t('login.emailPlaceholder')}
+                          placeholder={supabaseAuthEnabled ? 'admin' : t('login.emailPlaceholder')}
                           style={inputBase}
                           onFocus={(e: React.FocusEvent<HTMLInputElement>) => (e.target.style.borderColor = '#111827')}
                           onBlur={(e: React.FocusEvent<HTMLInputElement>) => (e.target.style.borderColor = '#e5e7eb')}

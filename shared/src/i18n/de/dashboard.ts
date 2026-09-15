@@ -162,6 +162,7 @@ const dashboard: TranslationStrings = {
   'dashboard.fx.from': 'Von',
   'dashboard.fx.to': 'Nach',
   'dashboard.fx.unavailable': 'Kurs nicht verfügbar',
+  'dashboard.fx.updatedAt': 'Aktualisiert am {date}',
   'dashboard.tz.searchPlaceholder': 'Zeitzone suchen…',
   'dashboard.tz.empty': 'Noch keine weiteren Zeitzonen — über + hinzufügen',
   'dashboard.upcoming.title': 'Anstehende Reservierungen',

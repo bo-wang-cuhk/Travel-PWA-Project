@@ -173,6 +173,7 @@ const dashboard: TranslationStrings = {
   'dashboard.fx.from': 'From',
   'dashboard.fx.to': 'To',
   'dashboard.fx.unavailable': 'Rate unavailable',
+  'dashboard.fx.updatedAt': 'Updated {date}',
   'dashboard.tz.searchPlaceholder': 'Search timezone…',
   'dashboard.tz.empty': 'No other timezones yet — add one with +',
   'dashboard.upcoming.title': 'Upcoming reservations',

@@ -159,6 +159,7 @@ const dashboard: TranslationStrings = {
   'dashboard.fx.from': 'Z',
   'dashboard.fx.to': 'Na',
   'dashboard.fx.unavailable': 'Kurz není dostupný',
+  'dashboard.fx.updatedAt': 'Aktualizováno: {date}',
   'dashboard.tz.searchPlaceholder': 'Hledat časové pásmo…',
   'dashboard.tz.empty': 'Zatím žádná další časová pásma — přidejte je pomocí +',
   'dashboard.upcoming.title': 'Nadcházející rezervace',

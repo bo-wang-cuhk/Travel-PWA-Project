@@ -160,6 +160,7 @@ const dashboard: TranslationStrings = {
   'dashboard.fx.from': 'De',
   'dashboard.fx.to': 'A',
   'dashboard.fx.unavailable': 'Tipo de cambio no disponible',
+  'dashboard.fx.updatedAt': 'Actualizado el {date}',
   'dashboard.tz.searchPlaceholder': 'Buscar zona horaria…',
   'dashboard.tz.empty': 'Aún no hay otras zonas horarias — añade una con +',
   'dashboard.upcoming.title': 'Próximas reservas',

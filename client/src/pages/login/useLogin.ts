@@ -8,6 +8,7 @@ import { wasSignedOut } from '../../utils/signedOut'
 import { authApi, configApi } from '../../api/client'
 import { getApiErrorMessage } from '../../types'
 import { START_DESTINATION_ROUTE } from '../../utils/startDestination'
+import { SUPABASE_AUTH_ENABLED } from '../../auth/supabaseClient'
 
 interface AppConfig {
   has_users: boolean
@@ -112,6 +113,26 @@ export function useLogin() {
     // reporter saw flashing. Guarding on the ref alone closes it whatever
     // re-triggers the effect.
     if (exchangeInitiated.current) return
+
+    if (SUPABASE_AUTH_ENABLED) {
+      setAppConfig({
+        has_users: true,
+        allow_registration: false,
+        setup_complete: true,
+        demo_mode: false,
+        oidc_configured: false,
+        oidc_only_mode: false,
+        password_login: true,
+        password_registration: false,
+        oidc_login: false,
+        oidc_registration: false,
+        passkey_login: false,
+        passkey_configured: false,
+        env_override_oidc_only: false,
+      })
+      setMode('login')
+      return
+    }
 
     const params = new URLSearchParams(window.location.search)
 
@@ -312,7 +333,7 @@ export function useLogin() {
     }
   }
 
-  const showRegisterOption = (appConfig?.password_registration || !appConfig?.has_users || inviteValid) && (appConfig?.setup_complete !== false || !appConfig?.has_users)
+  const showRegisterOption = !SUPABASE_AUTH_ENABLED && (appConfig?.password_registration || !appConfig?.has_users || inviteValid) && (appConfig?.setup_complete !== false || !appConfig?.has_users)
 
   // In OIDC-only mode, show a minimal page that redirects directly to the IdP
   const oidcOnly = !appConfig?.password_login && appConfig?.oidc_login && appConfig?.oidc_configured
@@ -326,6 +347,7 @@ export function useLogin() {
     showTakeoff, mfaStep, setMfaStep, mfaToken, setMfaToken, mfaCode, setMfaCode,
     passwordChangeStep, newPassword, setNewPassword, confirmPassword, setConfirmPassword,
     noRedirect, showRegisterOption, oidcOnly,
+    supabaseAuthEnabled: SUPABASE_AUTH_ENABLED,
     handleDemoLogin, handleSubmit, handlePasskeyLogin,
   }
 }

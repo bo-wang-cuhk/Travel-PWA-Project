@@ -159,6 +159,7 @@ const dashboard: TranslationStrings = {
   'dashboard.fx.from': 'Из',
   'dashboard.fx.to': 'В',
   'dashboard.fx.unavailable': 'Курс недоступен',
+  'dashboard.fx.updatedAt': 'Обновлено: {date}',
   'dashboard.tz.searchPlaceholder': 'Поиск часового пояса…',
   'dashboard.tz.empty': 'Других часовых поясов пока нет — добавьте с помощью +',
   'dashboard.upcoming.title': 'Ближайшие брони',

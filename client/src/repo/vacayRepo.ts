@@ -5,6 +5,8 @@ import { markLocalChange } from '../sync/localChangeRepository'
 import type { VacayHolidayCalendar, VacayPlan, VacayStat, VacayUser } from '../types'
 import { DEFAULT_YEAR_SETTINGS, inGridWindow } from '../vacay/yearWindow'
 import { getHolidays as getGermanHolidays } from '../components/Vacay/holidays'
+import { holidayService } from '../services/holiday/HolidayService'
+import type { HolidayDataStatus } from '../services/holiday/types'
 
 function currentUser(): VacayUser {
   try {
@@ -67,7 +69,29 @@ export const vacayRepo = {
   async toggleCompanyHoliday(date: string) { const value = await read(); value.companyHolidays = value.companyHolidays.some(v => v.date === date) ? value.companyHolidays.filter(v => v.date !== date) : [...value.companyHolidays, { date }]; await write(value); return { success: true } },
   async getStats(year: number) { const value = await read(); const stats = computeStats(value, year); value.stats = [...value.stats.filter(v => v.year !== year), ...stats]; await offlineDb.vacayData.put(value); return { stats } },
   async updateStats(year: number, days: number, targetUserId?: number) { const value = await read(); const id = targetUserId ?? currentUser().id; const stats = computeStats(value, year); value.stats = [...value.stats.filter(v => v.year !== year), ...stats.map(v => v.user_id === id ? { ...v, vacation_days: days, total_available: days + v.carried_over, remaining: days + v.carried_over - v.used } : v)]; await write(value); return { success: true } },
-  async getHolidays(year: number, country: string) { if (country !== 'DE') return []; return Object.entries(getGermanHolidays(year, '')).map(([date, name]) => ({ date, name, localName: name, global: true, counties: null })) },
+  async getHolidays(year: number, country: string) {
+    if (country === 'CN') {
+      const value = await holidayService.getChinaHoliday(year)
+      return {
+        status: value.status, source: value.source, fetchedAt: value.fetchedAt,
+        lastCheckedAt: value.lastCheckedAt, error: value.lastError,
+        holidays: value.days.map(day => ({
+          date: day.date, name: day.name, localName: day.name, global: true,
+          counties: null, isOffDay: day.isOffDay,
+        })),
+      }
+    }
+    if (country === 'DE') {
+      return {
+        status: 'ready' as HolidayDataStatus, source: 'local-rule', fetchedAt: null,
+        lastCheckedAt: null, error: null,
+        holidays: Object.entries(getGermanHolidays(year, '')).map(([date, name]) => ({
+          date, name, localName: name, global: true, counties: null, isOffDay: true,
+        })),
+      }
+    }
+    return { status: 'pending' as HolidayDataStatus, source: 'unavailable', fetchedAt: null, lastCheckedAt: null, error: null, holidays: [] }
+  },
   async getSchoolHolidays() { return [] },
   async addHolidayCalendar(data: { region: string; color?: string; label?: string | null; type?: 'public_holiday' | 'school_holiday' }) { const value = await read(); const calendar: VacayHolidayCalendar = { id: Math.min(0, ...value.plan.holiday_calendars.map(v => v.id)) - 1, plan_id: value.plan.id, region: data.region, color: data.color ?? '#fecaca', label: data.label ?? null, type: data.type ?? 'public_holiday', sort_order: value.plan.holiday_calendars.length }; value.plan.holiday_calendars.push(calendar); await write(value); return { calendar } },
   async updateHolidayCalendar(id: number, data: Partial<VacayHolidayCalendar>) { const value = await read(); value.plan.holiday_calendars = value.plan.holiday_calendars.map(v => v.id === id ? { ...v, ...data } : v); await write(value); const calendar = value.plan.holiday_calendars.find(v => v.id === id); if (!calendar) throw new Error('Holiday calendar not found'); return { calendar } },

@@ -160,6 +160,7 @@ const dashboard: TranslationStrings = {
   'dashboard.fx.from': 'Z',
   'dashboard.fx.to': 'Na',
   'dashboard.fx.unavailable': 'Kurs niedostępny',
+  'dashboard.fx.updatedAt': 'Zaktualizowano: {date}',
   'dashboard.tz.searchPlaceholder': 'Szukaj strefy czasowej…',
   'dashboard.tz.empty': 'Brak innych stref czasowych — dodaj jedną za pomocą +',
   'dashboard.upcoming.title': 'Nadchodzące rezerwacje',

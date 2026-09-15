@@ -28,7 +28,7 @@ export const createPackingSlice = (set: SetState, get: GetState): PackingSlice =
       set(state => ({ packingItems: [...state.packingItems, result.item] }))
       return result.item
     } catch (err: unknown) {
-      throw new Error(getApiErrorMessage(err, 'Error adding item'), { cause: err })
+      throw new Error(getApiErrorMessage(err, 'Error adding item'))
     }
   },
 
@@ -40,7 +40,7 @@ export const createPackingSlice = (set: SetState, get: GetState): PackingSlice =
       }))
       return result.item
     } catch (err: unknown) {
-      throw new Error(getApiErrorMessage(err, 'Error updating item'), { cause: err })
+      throw new Error(getApiErrorMessage(err, 'Error updating item'))
     }
   },
 
@@ -51,7 +51,7 @@ export const createPackingSlice = (set: SetState, get: GetState): PackingSlice =
       await packingRepo.delete(tripId, id)
     } catch (err: unknown) {
       set({ packingItems: prev })
-      throw new Error(getApiErrorMessage(err, 'Error deleting item'), { cause: err })
+      throw new Error(getApiErrorMessage(err, 'Error deleting item'))
     }
   },
 

@@ -55,9 +55,13 @@ export type {
 
 export interface User {
   id: number
+  /** Canonical Supabase identity. Numeric id remains a temporary TREK compatibility key. */
+  auth_id?: string
   username: string
+  display_name?: string
   email: string
   role: 'admin' | 'user'
+  status?: 'active' | 'disabled'
   avatar_url: string | null
   maps_api_key: string | null
   created_at: string
@@ -369,7 +373,9 @@ export interface HolidayInfo {
   localName: string
   color: string
   label: string | null
-  type?: 'public_holiday' | 'school_holiday'
+  type?: 'public_holiday' | 'school_holiday' | 'makeup_workday'
+  /** Official work/rest override. Undefined for providers without this concept. */
+  isOffDay?: boolean
 }
 
 export interface HolidaysMap {

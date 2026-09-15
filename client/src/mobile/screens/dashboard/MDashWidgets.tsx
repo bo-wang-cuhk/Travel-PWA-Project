@@ -14,6 +14,8 @@ import { formatTime, splitReservationDateTime } from '../../../utils/formatters'
 import { normalizeAppearance, MOBILE_DASH_TOKENS, type MobileDashToken, type Collection } from '@trek/shared'
 import { upcomingKey, type UpcomingReservation } from '../../../pages/dashboard/dashboardModel'
 import { STANDALONE_MODE } from '../../../config/runtimeMode'
+import { buildExchangeRateSnapshot, formatCurrencyName, formatExchangeRateDate, type ExchangeRateRow } from '../../../services/exchangeRateSnapshot'
+import { formatTimeZoneName } from '../../../services/timeZoneDisplay'
 
 const RES_ICON: Record<string, React.ReactElement> = {
   flight: <Plane size={14} strokeWidth={2} />,
@@ -101,7 +103,7 @@ function WidgetPanel({ icon, title, action, children }: {
 
 // ── Currency converter ───────────────────────────────────────────────────────
 function MCurrencyWidget(): React.ReactElement {
-  const { t } = useTranslation()
+  const { t, locale } = useTranslation()
   const isLoaded = useSettingsStore(s => s.isLoaded)
   const updateSetting = useSettingsStore(s => s.updateSetting)
   const from = useSettingsStore(s => s.settings.dashboard_fx_from) || 'EUR'
@@ -110,6 +112,7 @@ function MCurrencyWidget(): React.ReactElement {
   const setTo = (v: string) => { updateSetting('dashboard_fx_to', v).catch(() => {}) }
   const [amount, setAmount] = useState('100')
   const [rates, setRates] = useState<Record<string, number> | null>(null)
+  const [rateDates, setRateDates] = useState<Record<string, string>>({})
 
   // The request outlives the widget: this is a third-party endpoint on a mobile
   // screen a user can leave immediately, and both handlers below set state. Left
@@ -124,17 +127,16 @@ function MCurrencyWidget(): React.ReactElement {
     inFlight.current = controller
     fetch(`https://api.frankfurter.dev/v2/rates?base=${from}`, { signal: controller.signal })
       .then(r => r.json())
-      .then((d: Array<{ quote: string; rate: number }>) => {
+      .then((d: ExchangeRateRow[]) => {
         if (controller.signal.aborted) return
-        if (!Array.isArray(d)) { setRates(null); return }
-        // Frankfurter omits the base's own self-rate; seed it so `from` stays selectable.
-        const map: Record<string, number> = { [from]: 1 }
-        for (const r of d) map[r.quote] = r.rate
-        setRates(map)
+        if (!Array.isArray(d)) { setRates(null); setRateDates({}); return }
+        const snapshot = buildExchangeRateSnapshot(d, from)
+        setRates(snapshot.rates)
+        setRateDates(snapshot.dates)
       })
       .catch(() => {
         // An abort is not a failure: it means nobody is waiting for the answer.
-        if (!controller.signal.aborted) setRates(null)
+        if (!controller.signal.aborted) { setRates(null); setRateDates({}) }
       })
   }, [from])
 
@@ -161,6 +163,9 @@ function MCurrencyWidget(): React.ReactElement {
 
   const currencies = rates ? Object.keys(rates).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)) : [...CURRENCIES]
   const rate = rates?.[to] ?? null
+  const fromName = formatCurrencyName(from, locale)
+  const toName = formatCurrencyName(to, locale)
+  const formattedRateDate = formatExchangeRateDate(rateDates[to], locale)
   const converted = rate != null ? (Number.parseFloat(amount.replace(',', '.')) || 0) * rate : null
   const swap = () => { setFrom(to); setTo(from) }
 
@@ -184,7 +189,7 @@ function MCurrencyWidget(): React.ReactElement {
             aria-label={t('dashboard.fx.from')}
             className="w-full border-none bg-transparent pt-[2px] font-[inherit] text-[1.5rem] font-bold tabular-nums text-m-ink outline-none"
           />
-          <CurrencyPicker value={from} currencies={currencies} onChange={setFrom} />
+          <CurrencyPicker value={from} currencies={currencies} locale={locale} onChange={setFrom} />
         </div>
         <button
           type="button"
@@ -197,11 +202,12 @@ function MCurrencyWidget(): React.ReactElement {
         <div className="min-w-0 flex-1 rounded-[14px] border border-[color:var(--m-rowbr)] bg-[color:var(--m-ic)] p-[11px_12px]">
           <div className="font-geist text-[0.5625rem] font-bold uppercase tracking-[.1em] text-m-faint">{t('dashboard.fx.to')}</div>
           <div className="truncate pt-[2px] text-[1.5rem] font-bold tabular-nums">{converted != null ? converted.toFixed(2) : '—'}</div>
-          <CurrencyPicker value={to} currencies={currencies} onChange={setTo} />
+          <CurrencyPicker value={to} currencies={currencies} locale={locale} onChange={setTo} />
         </div>
       </div>
-      <div className="mt-[9px] font-geist text-[0.65625rem] text-m-muted">
-        {rate != null ? `1 ${from} = ${rate.toFixed(4)} ${to}` : t('dashboard.fx.unavailable')}
+      <div className="mt-[9px] flex flex-wrap justify-between gap-x-3 gap-y-1 font-geist text-[0.65625rem] text-m-muted">
+        <span>{rate != null ? `1 ${fromName} = ${rate.toFixed(4)} ${toName}` : t('dashboard.fx.unavailable')}</span>
+        {formattedRateDate && <span>{t('dashboard.fx.updatedAt', { date: formattedRateDate })}</span>}
       </div>
     </WidgetPanel>
   )
@@ -209,21 +215,21 @@ function MCurrencyWidget(): React.ReactElement {
 
 // Picker row styled like the design, backed by an invisible native select so
 // phones get their platform currency picker.
-function CurrencyPicker({ value, currencies, onChange }: {
-  value: string; currencies: string[]; onChange: (v: string) => void
+function CurrencyPicker({ value, currencies, locale, onChange }: {
+  value: string; currencies: string[]; locale: string; onChange: (v: string) => void
 }): React.ReactElement {
   return (
     <span className="relative mt-[9px] flex items-center justify-between gap-[5px] rounded-[10px] border border-[color:var(--m-rowbr)] bg-[color:var(--m-glass)] px-[10px] py-[7px] text-[0.75rem] font-semibold">
-      {value}
+      <span className="min-w-0 truncate">{formatCurrencyName(value, locale)}</span>
       <ChevronDown size={12} strokeWidth={2} className="text-m-faint" />
       <select
         value={value}
         onChange={e => onChange(e.target.value)}
-        aria-label={value}
+        aria-label={formatCurrencyName(value, locale)}
         className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
       >
-        {currencies.includes(value) ? null : <option value={value}>{value}</option>}
-        {currencies.map(c => <option key={c} value={c}>{c}</option>)}
+        {currencies.includes(value) ? null : <option value={value}>{formatCurrencyName(value, locale)}</option>}
+        {currencies.map(c => <option key={c} value={c}>{formatCurrencyName(c, locale)}</option>)}
       </select>
     </span>
   )
@@ -291,11 +297,6 @@ const FALLBACK_ZONES = [
   'Asia/Dubai', 'Asia/Kolkata', 'Asia/Bangkok', 'Asia/Shanghai', 'Asia/Tokyo', 'Asia/Singapore',
   'Australia/Sydney', 'Pacific/Auckland', 'UTC',
 ]
-
-function shortZone(tz: string): string {
-  const city = tz.split('/').pop() || tz
-  return city.replace(/_/g, ' ')
-}
 
 function MTimezonesWidget(): React.ReactElement {
   const { t, locale } = useTranslation()
@@ -366,17 +367,17 @@ function MTimezonesWidget(): React.ReactElement {
         >
           <option value="" disabled>{t('dashboard.tz.searchPlaceholder')}</option>
           {allZones.filter(z => !zones.includes(z)).map(z => (
-            <option key={z} value={z}>{z.replace(/_/g, ' ')}</option>
+            <option key={z} value={z}>{formatTimeZoneName(z, locale)}</option>
           ))}
         </select>
       )}
       {zones.map(tz => (
         <div key={tz} className="flex items-center gap-[11px] border-b border-[color:var(--m-rowbr)] py-[9px]">
           <span className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-[color:var(--m-ic)] text-[0.75rem] font-bold">
-            {shortZone(tz)[0]?.toUpperCase()}
+            {formatTimeZoneName(tz, locale)[0]?.toUpperCase()}
           </span>
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[0.84375rem] font-semibold">{shortZone(tz)}</div>
+            <div className="truncate text-[0.84375rem] font-semibold">{formatTimeZoneName(tz, locale)}</div>
             <div className="font-geist text-[0.625rem] text-m-faint">{offsetLabel(tz)}</div>
           </div>
           <span className="text-[1.25rem] font-bold tabular-nums">{timeIn(tz)}</span>
@@ -384,7 +385,7 @@ function MTimezonesWidget(): React.ReactElement {
           {adding && (
             <button
               type="button"
-              aria-label={t('dashboard.aria.removeTimezone', { city: shortZone(tz) })}
+              aria-label={t('dashboard.aria.removeTimezone', { city: formatTimeZoneName(tz, locale) })}
               onClick={() => removeZone(tz)}
               className="flex flex-none text-m-faint"
             >

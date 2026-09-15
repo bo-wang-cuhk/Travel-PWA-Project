@@ -1,4 +1,5 @@
 import type { User } from '../types'
+import { SUPABASE_AUTH_ENABLED } from '../auth/supabaseClient'
 
 /**
  * Built-in modules that are available without discovering them from the TREK
@@ -22,6 +23,9 @@ export const STANDALONE_ADDONS = [
  */
 export const STANDALONE_MODE =
   import.meta.env.MODE !== 'test' && import.meta.env.VITE_STANDALONE_MODE !== 'false'
+
+/** Static PWA data mode can coexist with real Supabase authentication. */
+export const STANDALONE_LOCAL_USER = STANDALONE_MODE && !SUPABASE_AUTH_ENABLED
 
 export const LOCAL_USER: User = {
   id: 0,

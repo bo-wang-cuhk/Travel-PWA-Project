@@ -24,7 +24,7 @@ export const createTodoSlice = (set: SetState, get: GetState): TodoSlice => ({
       set(state => ({ todoItems: [...state.todoItems, result.item] }))
       return result.item
     } catch (err: unknown) {
-      throw new Error(getApiErrorMessage(err, 'Error adding todo'), { cause: err })
+      throw new Error(getApiErrorMessage(err, 'Error adding todo'))
     }
   },
 
@@ -36,7 +36,7 @@ export const createTodoSlice = (set: SetState, get: GetState): TodoSlice => ({
       }))
       return result.item
     } catch (err: unknown) {
-      throw new Error(getApiErrorMessage(err, 'Error updating todo'), { cause: err })
+      throw new Error(getApiErrorMessage(err, 'Error updating todo'))
     }
   },
 
@@ -47,7 +47,7 @@ export const createTodoSlice = (set: SetState, get: GetState): TodoSlice => ({
       await todoRepo.delete(tripId, id)
     } catch (err: unknown) {
       set({ todoItems: prev })
-      throw new Error(getApiErrorMessage(err, 'Error deleting todo'), { cause: err })
+      throw new Error(getApiErrorMessage(err, 'Error deleting todo'))
     }
   },
 

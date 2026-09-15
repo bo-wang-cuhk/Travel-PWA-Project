@@ -100,10 +100,12 @@ export default function VacayMonthCard({
 
           const dateStr = `${year}-${pad(month + 1)}-${pad(day)}`
           const dayOfWeek = new Date(year, month, day).getDay()
-          const weekend = weekendDays.includes(dayOfWeek)
           const rawHolidayMarkers = holidays[dateStr]
           const holidayMarkers = Array.isArray(rawHolidayMarkers) ? rawHolidayMarkers : rawHolidayMarkers ? [rawHolidayMarkers] : []
           const publicHoliday = holidayMarkers.find(h => (h.type ?? 'public_holiday') === 'public_holiday')
+          const makeupWorkday = holidayMarkers.find(h => h.type === 'makeup_workday')
+          const officialOverride = holidayMarkers.find(h => h.isOffDay !== undefined)
+          const weekend = officialOverride ? officialOverride.isOffDay === true : weekendDays.includes(dayOfWeek)
           const schoolHolidayMarkers = holidayMarkers.filter(h => h.type === 'school_holiday')
           const isCompany = companyHolidaysEnabled && companyHolidaySet.has(dateStr)
           const dayEntries = entryMap[dateStr] || []
@@ -160,7 +162,9 @@ export default function VacayMonthCard({
           return (
             <div
               key={di}
-              title={publicHoliday ? (publicHoliday.label ? `${publicHoliday.label}: ${publicHoliday.localName}` : publicHoliday.localName) : undefined}
+              title={makeupWorkday
+                ? `${makeupWorkday.localName} · 班`
+                : publicHoliday ? (publicHoliday.label ? `${publicHoliday.label}: ${publicHoliday.localName}` : publicHoliday.localName) : undefined}
               // Stays a div: the cell is a grid item that stacks the segment,
               // ring and marker overlays on top of itself.
               role="button"
@@ -216,6 +220,14 @@ export default function VacayMonthCard({
                   The hover tooltip spells out who is on a half day. */}
               {anyHalf && (
                 <span className="absolute bottom-1 right-1 w-[5px] h-[5px] rounded-full z-[3] bg-[#f97316]" style={{ boxShadow: '0 0 0 1.5px var(--vg-surf)' }} aria-hidden />
+              )}
+
+              {makeupWorkday && (
+                <span
+                  className="absolute top-[1px] left-[2px] z-[3]"
+                  style={{ fontSize: 8, lineHeight: 1, fontWeight: 800, color: 'var(--vg-ink3)' }}
+                  aria-hidden
+                >班</span>
               )}
 
               {schoolHolidayMarkers.length > 0 && (

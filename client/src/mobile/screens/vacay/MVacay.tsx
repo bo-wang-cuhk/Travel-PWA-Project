@@ -25,7 +25,7 @@ const WEEKDAY_KEYS_SUNDAY = ['vacay.sun', 'vacay.mon', 'vacay.tue', 'vacay.wed',
  * the editor logs; the screen's own FAB in the dock centre flips back.
  */
 export default function MVacay() {
-  const { t } = useTranslation()
+  const { t, locale } = useTranslation()
   const v = useMVacay()
 
   if (v.loading) {
@@ -166,6 +166,21 @@ export default function MVacay() {
             <LegendChip key={cal.id} color={cal.color} label={cal.label || cal.region} />
           ))}
         </div>
+
+        {v.pendingChinaYears.length > 0 && (
+          <div className="mb-[10px] rounded-xl border border-[color:var(--m-rowbr)] bg-[color:var(--m-sheetop)] px-3 py-2 text-[0.6875rem] leading-4 text-[color:var(--m-faint)]">
+            {locale.startsWith('zh')
+              ? `中国大陆 ${v.pendingChinaYears.join('、')} 年节假日及调休安排尚未公布`
+              : `Mainland China holiday and makeup-workday arrangements for ${v.pendingChinaYears.join(', ')} are not published yet.`}
+          </div>
+        )}
+        {v.unavailableChinaYears.length > 0 && (
+          <div className="mb-[10px] rounded-xl border border-[color:var(--m-rowbr)] bg-[color:var(--m-sheetop)] px-3 py-2 text-[0.6875rem] leading-4 text-[color:var(--m-faint)]">
+            {locale.startsWith('zh')
+              ? `中国大陆 ${v.unavailableChinaYears.join('、')} 年节假日数据当前不可用`
+              : `Mainland China holiday data for ${v.unavailableChinaYears.join(', ')} is currently unavailable.`}
+          </div>
+        )}
 
         {/* Year grid */}
         {!edit && (

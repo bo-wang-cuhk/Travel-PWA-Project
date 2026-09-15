@@ -31,6 +31,7 @@ export default function MAdminSheets({ admin, t }: MAdminSheetsProps) {
     updateInfo, showUpdateModal, setShowUpdateModal,
     showRotateJwtModal, setShowRotateJwtModal, rotatingJwt, setRotatingJwt,
     handleCreateUser, handleSaveUser, handleDeleteUser,
+    supabaseAuthEnabled,
   } = admin
 
   const roleOptions = [
@@ -93,12 +94,12 @@ export default function MAdminSheets({ admin, t }: MAdminSheetsProps) {
                 placeholder={t('settings.username')}
               />
             </MAdminField>
-            <MAdminField label={`${t('common.email')} *`}>
+            <MAdminField label={`${supabaseAuthEnabled ? t('admin.oidcDisplayName') : t('common.email')} *`}>
               <MAdminInput
-                type="email"
-                value={createForm.email}
-                onChange={(e) => setCreateForm((f) => ({ ...f, email: e.target.value }))}
-                placeholder={t('common.email')}
+                type={supabaseAuthEnabled ? 'text' : 'email'}
+                value={supabaseAuthEnabled ? createForm.display_name : createForm.email}
+                onChange={(e) => setCreateForm((f) => supabaseAuthEnabled ? ({ ...f, display_name: e.target.value }) : ({ ...f, email: e.target.value }))}
+                placeholder={supabaseAuthEnabled ? t('admin.oidcDisplayName') : t('common.email')}
               />
             </MAdminField>
             <MAdminField label={`${t('common.password')} *`}>
@@ -142,11 +143,11 @@ export default function MAdminSheets({ admin, t }: MAdminSheetsProps) {
                   onChange={(e) => setEditForm((f) => ({ ...f, username: e.target.value }))}
                 />
               </MAdminField>
-              <MAdminField label={t('common.email')}>
+              <MAdminField label={supabaseAuthEnabled ? t('admin.oidcDisplayName') : t('common.email')}>
                 <MAdminInput
-                  type="email"
-                  value={editForm.email}
-                  onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
+                  type={supabaseAuthEnabled ? 'text' : 'email'}
+                  value={supabaseAuthEnabled ? editForm.display_name : editForm.email}
+                  onChange={(e) => setEditForm((f) => supabaseAuthEnabled ? ({ ...f, display_name: e.target.value }) : ({ ...f, email: e.target.value }))}
                 />
               </MAdminField>
               <MAdminField label={t('admin.newPassword')} hint={t('admin.newPasswordHint')}>

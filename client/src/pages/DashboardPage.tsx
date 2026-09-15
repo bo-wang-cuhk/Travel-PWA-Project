@@ -33,6 +33,8 @@ import { convertDistance, getDistanceUnitLabel } from '../utils/units'
 import { useSettingsStore } from '../store/settingsStore'
 import { useAddonStore } from '../store/addonStore'
 import { normalizeAppearance } from '@trek/shared'
+import { buildExchangeRateSnapshot, formatCurrencyName, formatExchangeRateDate, type ExchangeRateRow } from '../services/exchangeRateSnapshot'
+import { formatTimeZoneName } from '../services/timeZoneDisplay'
 import '../styles/dashboard.css'
 
 const GRADIENTS = [
@@ -642,7 +644,7 @@ function TripCard({ trip, locale, badges, onOpen, onEdit, onCopy, onArchive, onD
 
 // ── Currency tool (self-contained, mirrors the design's fx widget) ───────────
 function CurrencyTool(): React.ReactElement {
-  const { t } = useTranslation()
+  const { t, locale } = useTranslation()
   const isLoaded = useSettingsStore(s => s.isLoaded)
   const updateSetting = useSettingsStore(s => s.updateSetting)
   const from = useSettingsStore(s => s.settings.dashboard_fx_from) || 'EUR'
@@ -651,18 +653,18 @@ function CurrencyTool(): React.ReactElement {
   const setTo = (v: string) => { updateSetting('dashboard_fx_to', v).catch(() => {}) }
   const [amount, setAmount] = useState('100')
   const [rates, setRates] = useState<Record<string, number> | null>(null)
+  const [rateDates, setRateDates] = useState<Record<string, string>>({})
 
   const fetchRate = React.useCallback(() => {
     fetch(`https://api.frankfurter.dev/v2/rates?base=${from}`)
       .then(r => r.json())
-      .then((d: Array<{ quote: string; rate: number }>) => {
-        if (!Array.isArray(d)) { setRates(null); return }
-        // Frankfurter omits the base's own self-rate; seed it so `from` stays selectable.
-        const map: Record<string, number> = { [from]: 1 }
-        for (const r of d) map[r.quote] = r.rate
-        setRates(map)
+      .then((d: ExchangeRateRow[]) => {
+        if (!Array.isArray(d)) { setRates(null); setRateDates({}); return }
+        const snapshot = buildExchangeRateSnapshot(d, from)
+        setRates(snapshot.rates)
+        setRateDates(snapshot.dates)
       })
-      .catch(() => setRates(null))
+      .catch(() => { setRates(null); setRateDates({}) })
   }, [from])
 
   useEffect(() => { fetchRate() }, [fetchRate])
@@ -685,8 +687,11 @@ function CurrencyTool(): React.ReactElement {
   }, [isLoaded, updateSetting])
 
   const currencies = rates ? Object.keys(rates).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)) : CURRENCIES
-  const ccyOptions = currencies.map(c => ({ value: c, label: c }))
+  const ccyOptions = currencies.map(c => ({ value: c, label: formatCurrencyName(c, locale), searchLabel: c }))
   const rate = rates?.[to] ?? null
+  const fromName = formatCurrencyName(from, locale)
+  const toName = formatCurrencyName(to, locale)
+  const formattedRateDate = formatExchangeRateDate(rateDates[to], locale)
   const converted = rate != null ? (Number.parseFloat(amount.replace(',', '.')) || 0) * rate : null
 
   const swap = () => { setFrom(to); setTo(from) }
@@ -711,7 +716,8 @@ function CurrencyTool(): React.ReactElement {
         </div>
       </div>
       <div className="fx-rate">
-        <span>{rate != null ? `1 ${from} = ${rate.toFixed(4)} ${to}` : t('dashboard.fx.unavailable')}</span>
+        <span>{rate != null ? `1 ${fromName} = ${rate.toFixed(4)} ${toName}` : t('dashboard.fx.unavailable')}</span>
+        {formattedRateDate && <span>{t('dashboard.fx.updatedAt', { date: formattedRateDate })}</span>}
       </div>
     </div>
   )
@@ -727,11 +733,6 @@ const FALLBACK_ZONES = [
   'Asia/Dubai', 'Asia/Kolkata', 'Asia/Bangkok', 'Asia/Shanghai', 'Asia/Tokyo', 'Asia/Singapore',
   'Australia/Sydney', 'Pacific/Auckland', 'UTC',
 ]
-
-function shortZone(tz: string): string {
-  const city = tz.split('/').pop() || tz
-  return city.replace(/_/g, ' ')
-}
 
 function TimezoneTool({ locale }: { locale: string }): React.ReactElement {
   const { t } = useTranslation()
@@ -775,7 +776,7 @@ function TimezoneTool({ locale }: { locale: string }): React.ReactElement {
 
   const tzOptions = allZones
     .filter(z => !zones.includes(z))
-    .map(z => ({ value: z, label: z.replace(/_/g, ' '), searchLabel: z }))
+    .map(z => ({ value: z, label: formatTimeZoneName(z, locale), searchLabel: z }))
 
   const addZone = (tz: string) => { if (tz && !zones.includes(tz)) setZones([...zones, tz]); setAdding(false) }
   const removeZone = (tz: string) => setZones(zones.filter(z => z !== tz))
@@ -802,13 +803,13 @@ function TimezoneTool({ locale }: { locale: string }): React.ReactElement {
       <div className="tz-list">
         {zones.map(tz => (
           <div className="tz-row" key={tz}>
-            <div className="tz-dot">{shortZone(tz)[0]?.toUpperCase()}</div>
+            <div className="tz-dot">{formatTimeZoneName(tz, locale)[0]?.toUpperCase()}</div>
             <div>
-              <div className="tz-city">{shortZone(tz)}</div>
+              <div className="tz-city">{formatTimeZoneName(tz, locale)}</div>
               <div className="tz-sub">{offsetLabel(tz)}</div>
             </div>
             <div className="tz-time mono">{timeIn(tz)}</div>
-            <button type="button" className="tz-del" aria-label={t('dashboard.aria.removeTimezone', { city: shortZone(tz) })} onClick={() => removeZone(tz)}><X size={13} /></button>
+            <button type="button" className="tz-del" aria-label={t('dashboard.aria.removeTimezone', { city: formatTimeZoneName(tz, locale) })} onClick={() => removeZone(tz)}><X size={13} /></button>
           </div>
         ))}
         {zones.length === 0 && (

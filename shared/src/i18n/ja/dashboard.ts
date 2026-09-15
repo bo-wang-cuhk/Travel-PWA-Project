@@ -173,6 +173,7 @@ const dashboard: TranslationStrings = {
   'dashboard.fx.from': '変換元',
   'dashboard.fx.to': '変換先',
   'dashboard.fx.unavailable': 'レートを取得できません',
+  'dashboard.fx.updatedAt': '更新日: {date}',
   'dashboard.tz.searchPlaceholder': 'タイムゾーンを検索…',
   'dashboard.tz.empty': '他のタイムゾーンはまだありません — + で追加',
   'dashboard.upcoming.title': '今後の予約',

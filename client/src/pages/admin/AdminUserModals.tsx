@@ -44,6 +44,7 @@ export default function AdminUserModals({ admin, t }: AdminUserModalsProps): Rea
     setRotatingJwt,
     handleCreateUser,
     handleSaveUser,
+    supabaseAuthEnabled,
   } = admin;
   const [showCreatePw, setShowCreatePw] = React.useState(false);
   const [showEditPw, setShowEditPw] = React.useState(false);
@@ -85,12 +86,12 @@ export default function AdminUserModals({ admin, t }: AdminUserModalsProps): Rea
             />
           </div>
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-700">{t('common.email')} *</label>
+            <label className="mb-1.5 block text-sm font-medium text-slate-700">{supabaseAuthEnabled ? t('admin.oidcDisplayName') : t('common.email')} *</label>
             <input
-              type="email"
-              value={createForm.email}
-              onChange={(e) => setCreateForm((f) => ({ ...f, email: e.target.value }))}
-              placeholder={t('common.email')}
+              type={supabaseAuthEnabled ? 'text' : 'email'}
+              value={supabaseAuthEnabled ? createForm.display_name : createForm.email}
+              onChange={(e) => setCreateForm((f) => supabaseAuthEnabled ? ({ ...f, display_name: e.target.value }) : ({ ...f, email: e.target.value }))}
+              placeholder={supabaseAuthEnabled ? t('admin.oidcDisplayName') : t('common.email')}
               className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 focus:border-transparent focus:ring-2 focus:ring-slate-400"
             />
           </div>
@@ -164,11 +165,11 @@ export default function AdminUserModals({ admin, t }: AdminUserModalsProps): Rea
               />
             </div>
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-700">{t('common.email')}</label>
+              <label className="mb-1.5 block text-sm font-medium text-slate-700">{supabaseAuthEnabled ? t('admin.oidcDisplayName') : t('common.email')}</label>
               <input
-                type="email"
-                value={editForm.email}
-                onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
+                type={supabaseAuthEnabled ? 'text' : 'email'}
+                value={supabaseAuthEnabled ? editForm.display_name : editForm.email}
+                onChange={(e) => setEditForm((f) => supabaseAuthEnabled ? ({ ...f, display_name: e.target.value }) : ({ ...f, email: e.target.value }))}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 focus:border-transparent focus:ring-2 focus:ring-slate-400"
               />
             </div>

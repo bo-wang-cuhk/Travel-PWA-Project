@@ -81,6 +81,13 @@ export default function MVacayMonth({
                 style={{ background: '#f97316' }}
               />
             )}
+            {visual.makeupWorkday && (
+              <span
+                aria-hidden
+                className={`absolute left-[1px] top-[1px] z-[2] font-bold ${mini ? 'text-[5px]' : 'text-[7px]'}`}
+                style={{ lineHeight: 1, color: 'var(--m-faint)' }}
+              >班</span>
+            )}
             {visual.school && visual.school.length > 0 && (
               <span
                 aria-hidden
