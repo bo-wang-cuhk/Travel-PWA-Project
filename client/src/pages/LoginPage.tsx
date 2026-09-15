@@ -14,9 +14,10 @@ import {
 import React from 'react';
 import ToggleSwitch from '../components/Settings/ToggleSwitch';
 import { SUPPORTED_LANGUAGES, useTranslation } from '../i18n';
+import { publicAssetUrl } from '../utils/publicAssetUrl';
+import { clearSignedOut } from '../utils/signedOut';
 import { useLogin } from './login/useLogin';
 import LoginWorld from './login/LoginWorld';
-import { clearSignedOut } from '../utils/signedOut'
 
 /** Fixed so the sky does not reshuffle on every render. */
 const STARFIELD = [
@@ -127,7 +128,7 @@ export default function LoginPage(): React.ReactElement {
         <div className="takeoff-aurora takeoff-aurora-b" />
 
         <div className="takeoff-mark">
-          <img src="/logo-light.svg" alt="TREK" style={{ height: 'clamp(58px, 5.2vw, 84px)' }} />
+          <img src={publicAssetUrl('logo-light.svg')} alt="TREK" style={{ height: 'clamp(58px, 5.2vw, 84px)' }} />
           <p
             style={{
               margin: '12px 0 0',
@@ -382,7 +383,7 @@ export default function LoginPage(): React.ReactElement {
               map dimming around the mark instead of an outline. */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
             <img
-              src="/logo-light.svg"
+              src={publicAssetUrl('logo-light.svg')}
               alt="TREK"
               style={{
                 height: 'clamp(58px, 5.2vw, 84px)',
@@ -443,7 +444,7 @@ export default function LoginPage(): React.ReactElement {
             className="mobile-logo"
           >
             <style>{`@media(min-width:1024px){.mobile-logo{display:none!important}}`}</style>
-            <img src="/logo-dark.svg" alt="TREK" style={{ height: 48 }} />
+            <img src={publicAssetUrl('logo-dark.svg')} alt="TREK" style={{ height: 48 }} />
             <p
               style={{
                 margin: 0,
