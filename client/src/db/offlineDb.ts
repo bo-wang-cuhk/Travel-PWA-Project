@@ -2,6 +2,7 @@ import Dexie, { type Table } from 'dexie';
 import type { Trip, Day, Place, TodoItem, BudgetItem, Reservation, TripFile, Accommodation, TripMember, Tag, Category } from '../types';
 import type { LocalTripRecord, StoredTripRecord } from '../domain/tripSyncModel';
 import type { LocalDayRecord, StoredDayRecord } from '../domain/daySyncModel';
+import type { LocalDayNoteRecord } from '../domain/dayNoteSyncModel';
 import type { LocalPlaceRecord, StoredPlaceRecord } from '../domain/placeSyncModel';
 import type { LocalAssignmentRecord, StoredAssignmentRecord } from '../domain/assignmentSyncModel';
 import type { LocalAccommodationRecord, StoredAccommodationRecord } from '../domain/accommodationSyncModel';
@@ -10,13 +11,12 @@ import type { LocalBudgetItemRecord, StoredBudgetItemRecord } from '../domain/bu
 import type { LocalTodoRecord, StoredTodoRecord } from '../domain/todoSyncModel';
 import type { LocalPackingConfigRecord, LocalPackingItemRecord, StoredPackingBagRecord, StoredPackingItemRecord } from '../domain/packingSyncModel';
 import type { LocalVacayRecord } from '../domain/vacaySyncModel';
+import type { LocalTripFileRecord, StoredTripFileRecord } from '../domain/tripFileSyncModel';
 import type { HolidayCacheRecord } from '../services/holiday/types';
 import type {
   EntitySyncMetaRecord,
   SyncConflictRecord,
-  SyncCredentialRecord,
   SyncOutboxRecord,
-  SyncProviderConfigRecord,
   SyncStateRecord,
 } from '../sync/types';
 import { randomId } from '../utils/randomId';
@@ -121,6 +121,14 @@ export interface AppMeta {
   value: string;
 }
 
+export interface TripFileBlobRecord {
+  syncId: string;
+  blob: Blob;
+  mime: string;
+  bytes: number;
+  updatedAt: number;
+}
+
 // ── Dexie class ────────────────────────────────────────────────────────────────
 
 /**
@@ -153,6 +161,7 @@ function initialDbName(): string {
 class TrekOfflineDb extends Dexie {
   trips!: Table<StoredTripRecord, number>;
   days!: Table<StoredDayRecord, number>;
+  dayNotes!: Table<LocalDayNoteRecord, number>;
   places!: Table<StoredPlaceRecord, number>;
   assignments!: Table<StoredAssignmentRecord, number>;
   packingItems!: Table<StoredPackingItemRecord, number>;
@@ -163,7 +172,8 @@ class TrekOfflineDb extends Dexie {
   holidayCache!: Table<HolidayCacheRecord, string>;
   budgetItems!: Table<StoredBudgetItemRecord, number>;
   reservations!: Table<StoredReservationRecord, number>;
-  tripFiles!: Table<TripFile, number>;
+  tripFiles!: Table<StoredTripFileRecord, number>;
+  tripFileBlobs!: Table<TripFileBlobRecord, string>;
   accommodations!: Table<StoredAccommodationRecord, number>;
   tripMembers!: Table<CachedTripMember, [number, number]>;
   tags!: Table<Tag, number>;
@@ -177,8 +187,6 @@ class TrekOfflineDb extends Dexie {
   entitySyncMeta!: Table<EntitySyncMetaRecord, string>;
   syncState!: Table<SyncStateRecord, string>;
   syncConflicts!: Table<SyncConflictRecord, string>;
-  syncProviderConfig!: Table<SyncProviderConfigRecord, string>;
-  syncCredentials!: Table<SyncCredentialRecord, string>;
 
   constructor(name: string = ANON_DB_NAME) {
     super(name);
@@ -562,6 +570,136 @@ class TrekOfflineDb extends Dexie {
     this.version(14).stores({
       holidayCache: 'key, [countryCode+year], status, lastCheckedAt',
     });
+
+    // v15: Supabase Auth is now the only personal cloud identity and sync
+    // provider. Destroy device-local GitHub repository/PAT storage and convert
+    // any old manual conflicts back into the durable LWW outbox.
+    this.version(15).stores({
+      syncProviderConfig: null,
+      syncCredentials: null,
+    }).upgrade(async tx => {
+      await tx.table('syncState').delete('github');
+      await tx.table('syncConflicts').clear();
+      await tx.table('syncOutbox').where('status').equals('conflict').modify(row => {
+        row.status = 'pending';
+        row.lastError = null;
+      });
+      await tx.table('entitySyncMeta').where('status').equals('conflict').modify(row => {
+        row.status = 'pending';
+        row.lastError = null;
+      });
+    });
+
+    // v16: individual itinerary notes become first-class local-first records.
+    // Existing embedded Day.notes_items are migrated without deleting user data.
+    this.version(16).stores({
+      dayNotes: 'id, &sync_id, trip_id, trip_sync_id, day_id, day_sync_id, deleted_at, updated_at',
+    }).upgrade(async tx => {
+      const now = new Date().toISOString();
+      const trips = await tx.table('trips').toArray() as LocalTripRecord[];
+      const days = await tx.table('days').toArray() as LocalDayRecord[];
+      const tripIds = new Map(trips.map(row => [row.id, row.sync_id]));
+      const migrated: LocalDayNoteRecord[] = [];
+      for (const day of days) {
+        for (const note of day.notes_items ?? []) {
+          migrated.push({
+            ...note,
+            trip_id: day.trip_id,
+            sync_id: randomId(),
+            trip_sync_id: day.trip_sync_id || tripIds.get(day.trip_id) || `orphan:${day.trip_id}`,
+            day_sync_id: day.sync_id || `orphan:${day.id}`,
+            created_at: note.created_at || now,
+            updated_at: note.created_at || now,
+            deleted_at: null,
+          });
+        }
+      }
+      if (migrated.length > 0) await tx.table('dayNotes').bulkPut(migrated);
+      await tx.table('days').toCollection().modify((row: LocalDayRecord) => { delete row.notes_items });
+      const valid = (row: LocalDayNoteRecord) => !row.trip_sync_id.startsWith('orphan:') && !row.day_sync_id.startsWith('orphan:');
+      await tx.table('syncOutbox').bulkPut(migrated.filter(valid).map(row => ({
+        key: `dayNote:${row.sync_id}`, entityType: 'dayNote', entityId: row.sync_id,
+        operation: 'upsert', changedAt: Date.parse(row.updated_at) || Date.now(), status: 'pending', attempts: 0, lastError: null,
+      })));
+      await tx.table('entitySyncMeta').bulkPut(migrated.map(row => ({
+        key: `dayNote:${row.sync_id}`, entityType: 'dayNote', entityId: row.sync_id,
+        status: valid(row) ? 'pending' : 'error', remoteVersion: null, lastSyncedAt: null,
+        lastError: valid(row) ? null : 'Day note relation was not found during migration',
+      })));
+    });
+
+    // v17: one-time provider migration. Rows that were previously marked as
+    // GitHub-synced must be uploaded to the user's Personal Workspace even
+    // though they no longer have an outbox entry.
+    this.version(17).stores({}).upgrade(async tx => {
+      const groups = [
+        ['trips', 'trip', 'sync_id'], ['days', 'day', 'sync_id'], ['dayNotes', 'dayNote', 'sync_id'],
+        ['places', 'place', 'sync_id'], ['assignments', 'assignment', 'sync_id'],
+        ['accommodations', 'accommodation', 'sync_id'], ['reservations', 'reservation', 'sync_id'],
+        ['budgetItems', 'budgetItem', 'sync_id'], ['todoItems', 'todo', 'sync_id'],
+        ['packingBags', 'packingBag', 'sync_id'], ['packingItems', 'packingItem', 'sync_id'],
+        ['packingConfig', 'packingConfig', 'id'], ['vacayData', 'vacay', 'id'],
+      ] as const;
+      const outbox: SyncOutboxRecord[] = [];
+      const meta: EntitySyncMetaRecord[] = [];
+      for (const [tableName, entityType, idField] of groups) {
+        const rows = await tx.table(tableName).toArray() as Array<Record<string, unknown>>;
+        for (const row of rows) {
+          const entityId = row[idField];
+          const hasOrphan = Object.values(row).some(value => typeof value === 'string' && value.startsWith('orphan:'));
+          if (typeof entityId !== 'string' || !entityId || hasOrphan) continue;
+          const key = `${entityType}:${entityId}`;
+          const deletedAt = typeof row.deleted_at === 'string' ? row.deleted_at : null;
+          const updatedAt = typeof row.updated_at === 'string' ? Date.parse(row.updated_at) : Date.now();
+          outbox.push({ key, entityType, entityId, operation: deletedAt ? 'delete' : 'upsert', changedAt: updatedAt || Date.now(), status: 'pending', attempts: 0, lastError: null });
+          meta.push({ key, entityType, entityId, status: 'pending', remoteVersion: null, lastSyncedAt: null, lastError: null });
+        }
+      }
+      await tx.table('syncOutbox').bulkPut(outbox);
+      await tx.table('entitySyncMeta').bulkPut(meta);
+      await tx.table('syncConflicts').clear();
+      await tx.table('syncState').clear();
+    });
+
+    // v18: attachment metadata is a normal soft-deleted sync entity. Binary
+    // bodies live in a durable, non-evicting table and are mirrored to private
+    // Supabase Storage by the provider.
+    this.version(18).stores({
+      tripFiles: 'id, &sync_id, trip_id, trip_sync_id, place_sync_id, reservation_sync_id, deleted_at, updated_at',
+      tripFileBlobs: 'syncId, updatedAt',
+    }).upgrade(async tx => {
+      const now = new Date().toISOString();
+      const [trips, places, reservations] = await Promise.all([
+        tx.table('trips').toArray() as Promise<LocalTripRecord[]>,
+        tx.table('places').toArray() as Promise<LocalPlaceRecord[]>,
+        tx.table('reservations').toArray() as Promise<LocalReservationRecord[]>,
+      ]);
+      const tripIds = new Map(trips.map(row => [row.id, row.sync_id]));
+      const placeIds = new Map(places.map(row => [row.id, row.sync_id]));
+      const reservationIds = new Map(reservations.map(row => [row.id, row.sync_id]));
+      await tx.table('tripFiles').toCollection().modify((row: Partial<LocalTripFileRecord>) => {
+        if (!row.sync_id) row.sync_id = randomId();
+        if (!row.trip_sync_id) row.trip_sync_id = tripIds.get(Number(row.trip_id)) || `orphan:${row.trip_id}`;
+        if (row.place_sync_id === undefined) row.place_sync_id = row.place_id == null ? null : placeIds.get(Number(row.place_id)) || `orphan:${row.place_id}`;
+        if (row.reservation_sync_id === undefined) row.reservation_sync_id = row.reservation_id == null ? null : reservationIds.get(Number(row.reservation_id)) || `orphan:${row.reservation_id}`;
+        if (!row.linked_place_sync_ids) row.linked_place_sync_ids = (row.linked_place_ids || []).flatMap(id => id == null ? [] : [placeIds.get(Number(id)) || `orphan:${id}`]);
+        if (!row.linked_reservation_sync_ids) row.linked_reservation_sync_ids = (row.linked_reservation_ids || []).flatMap(id => id == null ? [] : [reservationIds.get(Number(id)) || `orphan:${id}`]);
+        if (!row.storage_path) row.storage_path = `${row.trip_sync_id}/${row.sync_id}/${encodeURIComponent(row.original_name || row.filename || 'attachment')}`;
+        if (!row.created_at) row.created_at = now;
+        if (!row.updated_at) row.updated_at = row.created_at;
+        if (row.deleted_at === undefined) row.deleted_at = null;
+        if (row.purged_at === undefined) row.purged_at = null;
+      });
+      const rows = await tx.table('tripFiles').toArray() as LocalTripFileRecord[];
+      for (const row of rows) {
+        const legacyBlob = row.url ? await tx.table('blobCache').get(row.url) as BlobCacheEntry | undefined : undefined;
+        if (legacyBlob?.blob) await tx.table('tripFileBlobs').put({ syncId: row.sync_id, blob: legacyBlob.blob, mime: legacyBlob.mime || row.mime_type, bytes: legacyBlob.bytes || legacyBlob.blob.size, updatedAt: Date.now() });
+        const orphan = [row.trip_sync_id, row.place_sync_id, row.reservation_sync_id, ...row.linked_place_sync_ids, ...row.linked_reservation_sync_ids].some(value => value?.startsWith('orphan:'));
+        const key = `tripFile:${row.sync_id}`;
+        if (!orphan) await tx.table('syncOutbox').put({ key, entityType: 'tripFile', entityId: row.sync_id, operation: row.deleted_at ? 'delete' : 'upsert', changedAt: Date.parse(row.updated_at) || Date.now(), status: 'pending', attempts: 0, lastError: null });
+        await tx.table('entitySyncMeta').put({ key, entityType: 'tripFile', entityId: row.sync_id, status: orphan ? 'error' : 'pending', remoteVersion: null, lastSyncedAt: null, lastError: orphan ? 'File relation was not found during migration' : null });
+      }
+    });
   }
 }
 
@@ -774,7 +912,23 @@ export async function upsertReservations(items: Reservation[]): Promise<void> {
 }
 
 export async function upsertTripFiles(files: TripFile[]): Promise<void> {
-  await offlineDb.tripFiles.bulkPut(files);
+  for (const file of files) {
+    const [existing, trip, place, reservation] = await Promise.all([
+      offlineDb.tripFiles.get(file.id), offlineDb.trips.get(file.trip_id),
+      file.place_id == null ? undefined : offlineDb.places.get(file.place_id),
+      file.reservation_id == null ? undefined : offlineDb.reservations.get(file.reservation_id),
+    ]);
+    const now = new Date().toISOString();
+    const syncId = existing?.sync_id || randomId();
+    await offlineDb.tripFiles.put({ ...existing, ...file, sync_id: syncId,
+      trip_sync_id: existing?.trip_sync_id || trip?.sync_id || `orphan:${file.trip_id}`,
+      place_sync_id: file.place_id == null ? null : place?.sync_id || `orphan:${file.place_id}`,
+      reservation_sync_id: file.reservation_id == null ? null : reservation?.sync_id || `orphan:${file.reservation_id}`,
+      linked_place_sync_ids: existing?.linked_place_sync_ids || [], linked_reservation_sync_ids: existing?.linked_reservation_sync_ids || [],
+      storage_path: existing?.storage_path || `${trip?.sync_id || `orphan:${file.trip_id}`}/${syncId}/${encodeURIComponent(file.original_name || file.filename)}`,
+      created_at: existing?.created_at || file.created_at || now, updated_at: existing?.updated_at || file.created_at || now,
+      deleted_at: file.deleted_at ?? existing?.deleted_at ?? null });
+  }
 }
 
 export async function upsertAccommodations(items: Accommodation[]): Promise<void> {
@@ -915,7 +1069,6 @@ export async function clearTripData(tripId: number): Promise<void> {
       offlineDb.packingItems,
       offlineDb.packingBags,
       offlineDb.todoItems,
-      offlineDb.tripFiles,
       offlineDb.tripMembers,
       offlineDb.mutationQueue,
       offlineDb.syncMeta,
@@ -925,7 +1078,8 @@ export async function clearTripData(tripId: number): Promise<void> {
       // Migrated domain tables are the working database, not disposable download
       // caches. Clearing offline extras must never erase user-authored data.
       // Packing and Todo are working data from v11/v12 onward, not disposable cache.
-      await offlineDb.tripFiles.where('trip_id').equals(tripId).delete();
+      // Files and their durable bodies are authored working data from v18;
+      // cache eviction must not remove them.
       await offlineDb.tripMembers.where('tripId').equals(tripId).delete();
       // Keep pending/syncing/conflict mutations — only purge dead 'failed' rows.
       await offlineDb.mutationQueue.where('tripId').equals(tripId).and(m => m.status === 'failed').delete();

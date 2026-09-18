@@ -1,5 +1,6 @@
 import { asLocalTripRecord, offlineDb } from '../db/offlineDb'
 import { applySyncedDay, toSyncedDay, type LocalDayRecord, type SyncedDay } from '../domain/daySyncModel'
+import { applySyncedDayNote, toSyncedDayNote, type SyncedDayNote } from '../domain/dayNoteSyncModel'
 import { applySyncedPlace, toSyncedPlace, type LocalPlaceRecord, type SyncedPlace } from '../domain/placeSyncModel'
 import { applySyncedAssignment, toSyncedAssignment, type LocalAssignmentRecord, type SyncedAssignment } from '../domain/assignmentSyncModel'
 import { applySyncedAccommodation, toSyncedAccommodation, type LocalAccommodationRecord, type SyncedAccommodation } from '../domain/accommodationSyncModel'
@@ -9,6 +10,7 @@ import { applySyncedTodo, toSyncedTodo, type LocalTodoRecord, type SyncedTodo } 
 import { applySyncedPackingBag, applySyncedPackingConfig, applySyncedPackingItem, toSyncedPackingBag, toSyncedPackingConfig, toSyncedPackingItem, type LocalPackingBagRecord, type LocalPackingItemRecord, type SyncedPackingBag, type SyncedPackingConfig, type SyncedPackingItem } from '../domain/packingSyncModel'
 import { applySyncedVacay, toSyncedVacay, VACAY_SYNC_ID, type SyncedVacay } from '../domain/vacaySyncModel'
 import { applySyncedTrip, toSyncedTrip, type SyncedTrip } from '../domain/tripSyncModel'
+import { applySyncedTripFile, toSyncedTripFile, type LocalTripFileRecord, type SyncedTripFile } from '../domain/tripFileSyncModel'
 import { syncEntityKey } from './localChangeRepository'
 import type { LocalChange, RemoteChange, SyncProvider } from './types'
 
@@ -21,6 +23,7 @@ async function nextLocalDayId(): Promise<number> {
   const first = await offlineDb.days.orderBy('id').first()
   return first && first.id < 0 ? first.id - 1 : -1
 }
+async function nextLocalDayNoteId(): Promise<number> { const first = await offlineDb.dayNotes.orderBy('id').first(); return first && first.id < 0 ? first.id - 1 : -1 }
 
 async function nextLocalPlaceId(): Promise<number> {
   const first = await offlineDb.places.orderBy('id').first()
@@ -37,6 +40,7 @@ async function nextLocalBudgetItemId(): Promise<number> { const first = await of
 async function nextLocalTodoId(): Promise<number> { const first = await offlineDb.todoItems.orderBy('id').first(); return first && first.id < 0 ? first.id - 1 : -1 }
 async function nextLocalPackingBagId(): Promise<number> { const first = await offlineDb.packingBags.orderBy('id').first(); return first && first.id < 0 ? first.id - 1 : -1 }
 async function nextLocalPackingItemId(): Promise<number> { const first = await offlineDb.packingItems.orderBy('id').first(); return first && first.id < 0 ? first.id - 1 : -1 }
+async function nextLocalTripFileId(): Promise<number> { const first = await offlineDb.tripFiles.orderBy('id').first(); return first && first.id < 0 ? first.id - 1 : -1 }
 
 export interface SyncRunResult {
   pulled: number
@@ -232,6 +236,38 @@ export class SyncManager {
         return 'applied'
       },
     )
+  }
+
+  private async applyRemoteDayNote(change: RemoteChange): Promise<'applied' | 'conflict' | 'unchanged'> {
+    const key = syncEntityKey(change.entityType, change.entityId)
+    return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.days, offlineDb.dayNotes, offlineDb.syncOutbox, offlineDb.entitySyncMeta, offlineDb.syncConflicts], async () => {
+      const [meta, pending, local] = await Promise.all([
+        offlineDb.entitySyncMeta.get(key), offlineDb.syncOutbox.get(key),
+        offlineDb.dayNotes.where('sync_id').equals(change.entityId).first(),
+      ])
+      if (meta?.remoteVersion === change.remoteVersion) return 'unchanged'
+      if (pending && pending.status !== 'conflict') {
+        await offlineDb.syncOutbox.update(key, { status: 'conflict', lastError: 'remote changed' })
+        await offlineDb.entitySyncMeta.put({ key, entityType: 'dayNote', entityId: change.entityId, status: 'conflict', remoteVersion: meta?.remoteVersion ?? null, lastSyncedAt: meta?.lastSyncedAt ?? null, lastError: 'Both local and remote versions changed' })
+        await offlineDb.syncConflicts.put({ key, entityType: 'dayNote', entityId: change.entityId, baseVersion: meta?.remoteVersion ?? null, remoteVersion: change.remoteVersion, localSnapshot: local ? toSyncedDayNote(local) : null, remoteSnapshot: change.payload, detectedAt: Date.now() })
+        return 'conflict'
+      }
+      const remote = change.payload as SyncedDayNote
+      if (!remote || remote.schemaVersion !== 1 || remote.id !== change.entityId) throw new Error(`Invalid remote day note ${change.entityId}`)
+      if (change.operation === 'delete') {
+        if (local) await offlineDb.dayNotes.put({ ...local, deleted_at: remote.deletedAt || new Date().toISOString(), updated_at: remote.updatedAt })
+      } else {
+        const [trip, day] = await Promise.all([
+          offlineDb.trips.where('sync_id').equals(remote.tripId).first(),
+          offlineDb.days.where('sync_id').equals(remote.dayId).first(),
+        ])
+        if (!trip || trip.deleted_at || !day || day.deleted_at || day.trip_id !== trip.id) throw new Error(`Day note ${remote.id} has an unavailable relation`)
+        await offlineDb.dayNotes.put(applySyncedDayNote(remote, local?.id ?? await nextLocalDayNoteId(), trip.id, day.id))
+      }
+      await offlineDb.entitySyncMeta.put({ key, entityType: 'dayNote', entityId: change.entityId, status: 'synced', remoteVersion: change.remoteVersion, lastSyncedAt: Date.now(), lastError: null })
+      await offlineDb.syncConflicts.delete(key)
+      return 'applied'
+    })
   }
 
   private async applyRemoteAssignment(change: RemoteChange): Promise<'applied' | 'conflict' | 'unchanged'> {
@@ -444,8 +480,53 @@ export class SyncManager {
     })
   }
 
-  private applyRemote(change: RemoteChange): Promise<'applied' | 'conflict' | 'unchanged'> {
+  private async applyRemoteTripFile(change: RemoteChange): Promise<'applied' | 'conflict' | 'unchanged'> {
+    const key = syncEntityKey(change.entityType, change.entityId)
+    const [meta, pending, local] = await Promise.all([
+      offlineDb.entitySyncMeta.get(key), offlineDb.syncOutbox.get(key),
+      offlineDb.tripFiles.where('sync_id').equals(change.entityId).first(),
+    ])
+    if (meta?.remoteVersion === change.remoteVersion) return 'unchanged'
+    if (pending && this.provider.syncMode !== 'last-write-wins') return 'conflict'
+    const remote = change.payload as SyncedTripFile
+    if (!remote || remote.schemaVersion !== 1 || remote.id !== change.entityId) throw new Error(`Invalid remote file ${change.entityId}`)
+    let downloaded: Blob | null = null
+    if (change.operation !== 'delete' && !(await offlineDb.tripFileBlobs.get(change.entityId))) {
+      if (!this.provider.downloadAttachment) throw new Error('The sync provider does not support attachments')
+      downloaded = await this.provider.downloadAttachment(remote.storagePath)
+    }
+    await offlineDb.transaction('rw', [offlineDb.trips, offlineDb.places, offlineDb.reservations, offlineDb.tripFiles, offlineDb.tripFileBlobs, offlineDb.entitySyncMeta, offlineDb.syncConflicts], async () => {
+      if (change.operation === 'delete') {
+        if (local) await offlineDb.tripFiles.put({ ...local, deleted_at: remote.deletedAt || new Date().toISOString(), updated_at: remote.updatedAt })
+      } else {
+        const [trip, place, reservation, linkedPlaces, linkedReservations] = await Promise.all([
+          offlineDb.trips.where('sync_id').equals(remote.tripId).first(),
+          remote.placeId ? offlineDb.places.where('sync_id').equals(remote.placeId).first() : undefined,
+          remote.reservationId ? offlineDb.reservations.where('sync_id').equals(remote.reservationId).first() : undefined,
+          Promise.all(remote.linkedPlaceIds.map(id => offlineDb.places.where('sync_id').equals(id).first())),
+          Promise.all(remote.linkedReservationIds.map(id => offlineDb.reservations.where('sync_id').equals(id).first())),
+        ])
+        if (!trip || trip.deleted_at || (remote.placeId && (!place || place.deleted_at)) || (remote.reservationId && (!reservation || reservation.deleted_at)) || linkedPlaces.some(value => !value || value.deleted_at) || linkedReservations.some(value => !value || value.deleted_at)) {
+          throw new Error(`File ${remote.id} has an unavailable relation`)
+        }
+        await offlineDb.tripFiles.put(applySyncedTripFile(remote, local?.id ?? await nextLocalTripFileId(), { tripId: trip.id, placeId: place?.id ?? null, reservationId: reservation?.id ?? null, linkedPlaceIds: linkedPlaces.map(value => value!.id), linkedReservationIds: linkedReservations.map(value => value!.id) }))
+        if (downloaded) await offlineDb.tripFileBlobs.put({ syncId: remote.id, blob: downloaded, mime: remote.mimeType, bytes: downloaded.size, updatedAt: Date.now() })
+      }
+      await offlineDb.entitySyncMeta.put({ key, entityType: 'tripFile', entityId: change.entityId, status: 'synced', remoteVersion: change.remoteVersion, lastSyncedAt: Date.now(), lastError: null })
+      await offlineDb.syncConflicts.delete(key)
+    })
+    return 'applied'
+  }
+
+  private async applyRemote(change: RemoteChange): Promise<'applied' | 'conflict' | 'unchanged'> {
+    // An edit made while a Supabase run is in flight is a newer unsent local
+    // write. Leave it in the outbox; the next run will commit it and then pull
+    // the cloud winner. Never turn this normal LWW race into a manual conflict.
+    if (this.provider.syncMode === 'last-write-wins' && await offlineDb.syncOutbox.get(syncEntityKey(change.entityType, change.entityId))) {
+      return 'unchanged'
+    }
     if (change.entityType === 'day') return this.applyRemoteDay(change)
+    if (change.entityType === 'dayNote') return this.applyRemoteDayNote(change)
     if (change.entityType === 'place') return this.applyRemotePlace(change)
     if (change.entityType === 'assignment') return this.applyRemoteAssignment(change)
     if (change.entityType === 'accommodation') return this.applyRemoteAccommodation(change)
@@ -455,8 +536,110 @@ export class SyncManager {
     if (change.entityType === 'packingBag') return this.applyRemotePackingBag(change)
     if (change.entityType === 'packingItem') return this.applyRemotePackingItem(change)
     if (change.entityType === 'packingConfig') return this.applyRemotePackingConfig(change)
+    if (change.entityType === 'tripFile') return this.applyRemoteTripFile(change)
     if (change.entityType === 'vacay') return this.applyRemoteVacay(change)
     return this.applyRemoteTrip(change)
+  }
+
+  /** Serialize the durable outbox without consulting a cloud implementation. */
+  private async collectLocalChanges(): Promise<LocalChange[]> {
+    const outbox = await offlineDb.syncOutbox
+      .filter(row => row.status === 'pending' || row.status === 'error' || row.status === 'conflict')
+      .sortBy('changedAt')
+    const changes: LocalChange[] = []
+    for (const row of outbox) {
+      const meta = await offlineDb.entitySyncMeta.get(row.key)
+      if (row.entityType === 'trip') {
+        const value = await offlineDb.trips.where('sync_id').equals(row.entityId).first(); if (!value) continue
+        changes.push({ entityType: 'trip', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedTrip({ ...asLocalTripRecord(value), sync_id: row.entityId }) })
+      } else if (row.entityType === 'day') {
+        const value = await offlineDb.days.where('sync_id').equals(row.entityId).first(); if (!value) continue
+        changes.push({ entityType: 'day', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedDay(value as LocalDayRecord) })
+      } else if (row.entityType === 'dayNote') {
+        const value = await offlineDb.dayNotes.where('sync_id').equals(row.entityId).first(); if (!value) continue
+        changes.push({ entityType: 'dayNote', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedDayNote(value) })
+      } else if (row.entityType === 'place') {
+        const value = await offlineDb.places.where('sync_id').equals(row.entityId).first(); if (!value) continue
+        changes.push({ entityType: 'place', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedPlace(value as LocalPlaceRecord) })
+      } else if (row.entityType === 'assignment') {
+        const value = await offlineDb.assignments.where('sync_id').equals(row.entityId).first(); if (!value) continue
+        changes.push({ entityType: 'assignment', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedAssignment(value as LocalAssignmentRecord) })
+      } else if (row.entityType === 'accommodation') {
+        const value = await offlineDb.accommodations.where('sync_id').equals(row.entityId).first(); if (!value) continue
+        changes.push({ entityType: 'accommodation', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedAccommodation(value as LocalAccommodationRecord) })
+      } else if (row.entityType === 'reservation') {
+        const value = await offlineDb.reservations.where('sync_id').equals(row.entityId).first(); if (!value) continue
+        const days = await offlineDb.days.where('trip_id').equals(value.trip_id).toArray()
+        changes.push({ entityType: 'reservation', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedReservation(value as LocalReservationRecord, new Map(days.map(day => [day.id, day.sync_id!]))) })
+      } else if (row.entityType === 'budgetItem') {
+        const value = await offlineDb.budgetItems.where('sync_id').equals(row.entityId).first(); if (!value) continue
+        changes.push({ entityType: 'budgetItem', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedBudgetItem(value as LocalBudgetItemRecord) })
+      } else if (row.entityType === 'todo') {
+        const value = await offlineDb.todoItems.where('sync_id').equals(row.entityId).first(); if (!value) continue
+        changes.push({ entityType: 'todo', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedTodo(value as LocalTodoRecord) })
+      } else if (row.entityType === 'packingBag') {
+        const value = await offlineDb.packingBags.where('sync_id').equals(row.entityId).first(); if (!value) continue
+        changes.push({ entityType: 'packingBag', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedPackingBag(value as LocalPackingBagRecord) })
+      } else if (row.entityType === 'packingItem') {
+        const value = await offlineDb.packingItems.where('sync_id').equals(row.entityId).first(); if (!value) continue
+        changes.push({ entityType: 'packingItem', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedPackingItem(value as LocalPackingItemRecord) })
+      } else if (row.entityType === 'vacay') {
+        const value = await offlineDb.vacayData.get(VACAY_SYNC_ID); if (!value) continue
+        changes.push({ entityType: 'vacay', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedVacay(value) })
+      } else if (row.entityType === 'packingConfig') {
+        const value = await offlineDb.packingConfig.get('personal-packing'); if (!value) continue
+        changes.push({ entityType: 'packingConfig', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedPackingConfig(value) })
+      } else if (row.entityType === 'tripFile') {
+        const value = await offlineDb.tripFiles.where('sync_id').equals(row.entityId).first() as LocalTripFileRecord | undefined; if (!value) continue
+        changes.push({ entityType: 'tripFile', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedTripFile(value) })
+      }
+    }
+    const order = { trip: 0, day: 1, dayNote: 2, place: 2, assignment: 3, accommodation: 4, reservation: 5, budgetItem: 6, todo: 6, packingBag: 6, packingItem: 7, tripFile: 8, packingConfig: 9, vacay: 9 } as const
+    return changes.sort((a, b) => order[a.entityType] - order[b.entityType])
+  }
+
+  /** Supabase LWW flow: durable local writes first, then cloud incrementals. */
+  private async syncLastWriteWins(previousCursor: string | null): Promise<SyncRunResult> {
+    const changes = await this.collectLocalChanges()
+    if (changes.length > 0) {
+      for (const change of changes.filter(item => item.entityType === 'tripFile' && item.operation === 'upsert')) {
+        const metadata = change.payload as SyncedTripFile
+        const body = await offlineDb.tripFileBlobs.get(change.entityId)
+        if (!body) throw new Error(`Attachment ${metadata.originalName} is not available on this device`)
+        if (!this.provider.uploadAttachment) throw new Error('The sync provider does not support attachments')
+        await this.provider.uploadAttachment(metadata.storagePath, body.blob, metadata.mimeType)
+      }
+      for (const change of changes) await offlineDb.syncOutbox.update(syncEntityKey(change.entityType, change.entityId), { status: 'syncing' })
+      const pushed = await this.provider.push(changes, previousCursor)
+      await offlineDb.transaction('rw', [offlineDb.syncOutbox, offlineDb.entitySyncMeta, offlineDb.syncConflicts], async () => {
+        for (const change of changes) {
+          const key = syncEntityKey(change.entityType, change.entityId)
+          const pending = await offlineDb.syncOutbox.get(key)
+          if (pending?.status === 'syncing') await offlineDb.syncOutbox.delete(key)
+          await offlineDb.syncConflicts.delete(key)
+          await offlineDb.entitySyncMeta.put({
+            key, entityType: change.entityType, entityId: change.entityId,
+            status: pending?.status === 'pending' ? 'pending' : 'synced',
+            remoteVersion: pushed.versions[change.entityId] ?? null, lastSyncedAt: Date.now(), lastError: null,
+          })
+        }
+      })
+    }
+
+    // Pull from the device's previous cursor, not the post-push cursor: this
+    // downloads our server-stamped revisions plus any concurrent device writes.
+    const remote = await this.provider.pull(previousCursor)
+    const order = { trip: 0, day: 1, dayNote: 2, place: 2, assignment: 3, accommodation: 4, reservation: 5, budgetItem: 6, todo: 6, packingBag: 6, packingItem: 7, tripFile: 8, packingConfig: 9, vacay: 9 } as const
+    const ordered = [...remote.changes].sort((a, b) => order[a.entityType] - order[b.entityType])
+    let pulled = 0
+    for (const change of ordered) {
+      const result = await this.applyRemote(change)
+      if (result === 'applied') pulled++
+    }
+    await offlineDb.syncState.put({
+      providerId: this.provider.id, cursor: remote.cursor, lastSyncAt: Date.now(), lastError: null, status: 'idle',
+    })
+    return { pulled, pushed: changes.length, conflicts: 0, cursor: remote.cursor }
   }
 
   async sync(): Promise<SyncRunResult> {
@@ -471,12 +654,13 @@ export class SyncManager {
 
     try {
       await this.provider.connect()
+      if (this.provider.syncMode === 'last-write-wins') return await this.syncLastWriteWins(previous?.cursor ?? null)
       // Pull before push. Store the observed head before pushing so a retry after
       // a non-fast-forward starts from the exact remote version we merged.
       const remote = await this.provider.pull(previous?.cursor)
       let pulled = 0
       let conflicts = 0
-      const dependencyOrder = { trip: 0, day: 1, place: 2, assignment: 3, accommodation: 4, reservation: 5, budgetItem: 6, todo: 6, packingBag: 6, packingItem: 7, packingConfig: 8, vacay: 8 } as const
+      const dependencyOrder = { trip: 0, day: 1, dayNote: 2, place: 2, assignment: 3, accommodation: 4, reservation: 5, budgetItem: 6, todo: 6, packingBag: 6, packingItem: 7, tripFile: 8, packingConfig: 9, vacay: 9 } as const
       const orderedRemoteChanges = [...remote.changes].sort(
         (a, b) => dependencyOrder[a.entityType] - dependencyOrder[b.entityType],
       )

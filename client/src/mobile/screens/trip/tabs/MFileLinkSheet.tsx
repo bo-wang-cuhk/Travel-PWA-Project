@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { Check, Link2, Loader2, MapPin, Ticket, TrainFront } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import MSheet from '../../../components/MSheet'
-import { filesApi } from '../../../../api/client'
+import { fileRepo } from '../../../../repo/fileRepo'
 import type { TripFile } from '../../../../types'
 import type { TripPlanner } from '../MTripShell'
 import { Eyebrow, TileHeader } from '../sheets/MTripSheetUi'
@@ -12,12 +12,6 @@ interface MFileLinkSheetProps {
   /** null closes the sheet; kept mounted through the exit animation via heldRef. */
   file: TripFile | null
   onClose: () => void
-}
-
-interface FileLinkRecord {
-  id: number
-  place_id?: number | string | null
-  reservation_id?: number | string | null
 }
 
 /**
@@ -56,16 +50,14 @@ export default function MFileLinkSheet({ planner, file, onClose }: MFileLinkShee
     try {
       if (placeIds.has(placeId)) {
         if (shown.place_id === placeId) {
-          await filesApi.update(tripId, shown.id, { place_id: null })
+          await fileRepo.update(shown.id, { place_id: null })
         } else {
-          const linksRes = (await filesApi.getLinks(tripId, shown.id)) as { links: FileLinkRecord[] }
-          const link = (linksRes.links || []).find(l => Number(l.place_id) === placeId)
-          if (link) await filesApi.removeLink(tripId, shown.id, link.id)
+          await fileRepo.update(shown.id, { linked_place_ids: (shown.linked_place_ids || []).filter(id => id !== placeId) })
         }
       } else if (shown.place_id == null) {
-        await filesApi.update(tripId, shown.id, { place_id: placeId })
+        await fileRepo.update(shown.id, { place_id: placeId })
       } else {
-        await filesApi.addLink(tripId, shown.id, { place_id: placeId })
+        await fileRepo.update(shown.id, { linked_place_ids: [...(shown.linked_place_ids || []).filter((id): id is number => id != null), placeId] })
       }
       refresh()
     } catch {
@@ -82,16 +74,14 @@ export default function MFileLinkSheet({ planner, file, onClose }: MFileLinkShee
     try {
       if (resIds.has(resId)) {
         if (shown.reservation_id === resId) {
-          await filesApi.update(tripId, shown.id, { reservation_id: null })
+          await fileRepo.update(shown.id, { reservation_id: null })
         } else {
-          const linksRes = (await filesApi.getLinks(tripId, shown.id)) as { links: FileLinkRecord[] }
-          const link = (linksRes.links || []).find(l => Number(l.reservation_id) === resId)
-          if (link) await filesApi.removeLink(tripId, shown.id, link.id)
+          await fileRepo.update(shown.id, { linked_reservation_ids: (shown.linked_reservation_ids || []).filter(id => id !== resId) })
         }
       } else if (shown.reservation_id == null) {
-        await filesApi.update(tripId, shown.id, { reservation_id: resId })
+        await fileRepo.update(shown.id, { reservation_id: resId })
       } else {
-        await filesApi.addLink(tripId, shown.id, { reservation_id: resId })
+        await fileRepo.update(shown.id, { linked_reservation_ids: [...(shown.linked_reservation_ids || []).filter((id): id is number => id != null), resId] })
       }
       refresh()
     } catch {

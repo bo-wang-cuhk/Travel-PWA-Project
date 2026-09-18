@@ -1,5 +1,6 @@
 export async function getAuthUrl(url: string, purpose: 'download'): Promise<string> {
   if (!url) return url
+  if (url.startsWith('blob:')) return url
   try {
     const resp = await fetch('/api/auth/resource-token', {
       method: 'POST',

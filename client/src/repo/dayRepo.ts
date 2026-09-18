@@ -30,10 +30,20 @@ function asLocalDay(day: StoredDayRecord, tripSyncId: string): LocalDayRecord {
 }
 
 async function activeDays(tripId: number): Promise<LocalDayRecord[]> {
-  const rows = await offlineDb.days.where('trip_id').equals(tripId).toArray()
-  return rows
+  const [rows, notes] = await Promise.all([
+    offlineDb.days.where('trip_id').equals(tripId).toArray(),
+    offlineDb.dayNotes.where('trip_id').equals(tripId).toArray(),
+  ])
+  const byDay = new Map<number, typeof notes>()
+  for (const note of notes.filter(value => !value.deleted_at)) {
+    const group = byDay.get(note.day_id) || []
+    group.push(note)
+    byDay.set(note.day_id, group)
+  }
+  return (rows
     .filter(day => !day.deleted_at)
-    .sort((a, b) => (a.day_number ?? 0) - (b.day_number ?? 0)) as LocalDayRecord[]
+    .sort((a, b) => (a.day_number ?? 0) - (b.day_number ?? 0)) as LocalDayRecord[])
+    .map(day => ({ ...day, notes_items: (byDay.get(day.id) || []).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)) }))
 }
 
 export const dayRepo = {
@@ -44,14 +54,15 @@ export const dayRepo = {
   async get(dayId: number | string): Promise<{ day: LocalDayRecord }> {
     const day = await offlineDb.days.get(Number(dayId))
     if (!day || day.deleted_at) throw new Error('Day not found in local database')
-    return { day: day as LocalDayRecord }
+    const notes = await offlineDb.dayNotes.where('day_id').equals(day.id).toArray()
+    return { day: { ...day, notes_items: notes.filter(note => !note.deleted_at).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)) } as LocalDayRecord }
   },
 
   async create(tripId: number | string, data: DayCreateRequest = {}): Promise<{ day: LocalDayRecord }> {
     const localTripId = Number(tripId)
     return offlineDb.transaction(
       'rw',
-      [offlineDb.trips, offlineDb.days, offlineDb.syncOutbox, offlineDb.entitySyncMeta],
+      [offlineDb.trips, offlineDb.days, offlineDb.dayNotes, offlineDb.syncOutbox, offlineDb.entitySyncMeta],
       async () => {
         const trip = await offlineDb.trips.get(localTripId)
         if (!trip || trip.deleted_at || !trip.sync_id) throw new Error('Trip not found in local database')
@@ -102,7 +113,7 @@ export const dayRepo = {
   async update(tripId: number | string, dayId: number | string, data: DayUpdateRequest): Promise<{ day: LocalDayRecord }> {
     const localTripId = Number(tripId)
     const id = Number(dayId)
-    return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.days, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
+    return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.days, offlineDb.dayNotes, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
       const [trip, stored] = await Promise.all([offlineDb.trips.get(localTripId), offlineDb.days.get(id)])
       if (!trip || trip.deleted_at || !trip.sync_id) throw new Error('Trip not found in local database')
       if (!stored || stored.deleted_at || stored.trip_id !== localTripId) throw new Error('Day not found in local database')
@@ -119,7 +130,7 @@ export const dayRepo = {
 
   async reorder(tripId: number | string, orderedIds: number[]): Promise<{ days: LocalDayRecord[] }> {
     const localTripId = Number(tripId)
-    return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.days, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
+    return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.days, offlineDb.dayNotes, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
       const trip = await offlineDb.trips.get(localTripId)
       if (!trip || trip.deleted_at || !trip.sync_id) throw new Error('Trip not found in local database')
       const rows = await activeDays(localTripId)
@@ -151,7 +162,7 @@ export const dayRepo = {
     const id = Number(dayId)
     await offlineDb.transaction(
       'rw',
-      [offlineDb.trips, offlineDb.days, offlineDb.assignments, offlineDb.accommodations, offlineDb.reservations, offlineDb.syncOutbox, offlineDb.entitySyncMeta],
+      [offlineDb.trips, offlineDb.days, offlineDb.dayNotes, offlineDb.assignments, offlineDb.accommodations, offlineDb.reservations, offlineDb.syncOutbox, offlineDb.entitySyncMeta],
       async () => {
         const [trip, stored] = await Promise.all([offlineDb.trips.get(localTripId), offlineDb.days.get(id)])
         if (!trip || trip.deleted_at || !trip.sync_id) throw new Error('Trip not found in local database')
@@ -160,6 +171,11 @@ export const dayRepo = {
         const deleted = { ...asLocalDay(stored, trip.sync_id), deleted_at: now, updated_at: now }
         await offlineDb.days.put(deleted)
         await markLocalChange('day', deleted.sync_id, 'delete')
+        const notes = await offlineDb.dayNotes.where('day_id').equals(id).toArray()
+        for (const note of notes.filter(item => !item.deleted_at)) {
+          await offlineDb.dayNotes.put({ ...note, deleted_at: now, updated_at: now })
+          await markLocalChange('dayNote', note.sync_id, 'delete')
+        }
         const assignments = await offlineDb.assignments.where('day_id').equals(id).toArray() as LocalAssignmentRecord[]
         for (const assignment of assignments.filter(item => !item.deleted_at)) {
           const tombstone = { ...assignment, deleted_at: now, updated_at: now }

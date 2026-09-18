@@ -1,4 +1,4 @@
-export type SyncEntityType = 'trip' | 'day' | 'place' | 'assignment' | 'accommodation' | 'reservation' | 'budgetItem' | 'todo' | 'packingBag' | 'packingItem' | 'packingConfig' | 'vacay'
+export type SyncEntityType = 'trip' | 'day' | 'dayNote' | 'place' | 'assignment' | 'accommodation' | 'reservation' | 'budgetItem' | 'todo' | 'packingBag' | 'packingItem' | 'packingConfig' | 'tripFile' | 'vacay'
 export type SyncOperation = 'upsert' | 'delete'
 export type EntitySyncStatus = 'synced' | 'pending' | 'syncing' | 'conflict' | 'error'
 
@@ -35,11 +35,15 @@ export interface ProviderStatus {
 
 export interface SyncProvider {
   readonly id: string
+  readonly syncMode?: 'merge' | 'last-write-wins'
   connect(): Promise<ProviderStatus>
   disconnect(): Promise<void>
   pull(cursor?: string | null): Promise<RemoteChanges>
   push(changes: LocalChange[], cursor?: string | null): Promise<PushResult>
   getStatus(): Promise<ProviderStatus>
+  /** Optional binary-object channel. Business metadata still travels through push/pull. */
+  uploadAttachment?(path: string, blob: Blob, contentType: string): Promise<void>
+  downloadAttachment?(path: string): Promise<Blob>
 }
 
 export interface SyncOutboxRecord {
@@ -80,21 +84,4 @@ export interface SyncConflictRecord {
   localSnapshot: unknown
   remoteSnapshot: unknown
   detectedAt: number
-}
-
-export interface GitHubSyncPublicConfig {
-  owner: string
-  repository: string
-  branch: string
-  enabled: boolean
-}
-
-export interface SyncProviderConfigRecord {
-  providerId: string
-  config: GitHubSyncPublicConfig
-}
-
-export interface SyncCredentialRecord {
-  providerId: string
-  secret: string
 }

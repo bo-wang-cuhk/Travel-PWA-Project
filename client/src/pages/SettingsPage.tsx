@@ -23,7 +23,7 @@ export default function SettingsPage(): React.ReactElement {
 }
 
 function SettingsPageDesktop(): React.ReactElement {
-  const { t } = useTranslation()
+  const { t, locale } = useTranslation()
   // Page = wiring container: addon/version loading + active-tab state in the hook.
   const { hasIntegrations, appVersion, activeTab, setActiveTab, managed } = useSettings()
   const hasPlugins = usePluginStore(s => s.plugins.length > 0)
@@ -40,7 +40,7 @@ function SettingsPageDesktop(): React.ReactElement {
       ? [{ id: 'plugins', label: t('settings.tabs.plugins'), icon: Blocks }]
       : []),
     { id: 'offline', label: t('settings.tabs.offline'), icon: CloudOff },
-    { id: 'sync', label: 'GitHub Sync', icon: Cloud },
+    { id: 'sync', label: locale.startsWith('zh') ? '云同步' : 'Cloud Sync', icon: Cloud },
     { id: 'account', label: t('settings.tabs.account'), icon: User },
     // About is where the project lives: what TREK is, where to report a bug,
     // where to support it. A customer of a hosted instance is the audience for

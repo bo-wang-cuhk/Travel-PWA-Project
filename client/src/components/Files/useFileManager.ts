@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { useToast } from '../shared/Toast'
 import { useTranslation, translateApiError } from '../../i18n'
-import { filesApi } from '../../api/client'
+import { fileRepo } from '../../repo/fileRepo'
 import type { Place, Reservation, TripFile, Day, AssignmentsMap } from '../../types'
 import { useCanDo } from '../../store/permissionsStore'
 import { useTripStore } from '../../store/tripStore'
@@ -43,7 +43,7 @@ export function useFileManager({ files = [], onUpload, onDelete, onUpdate, place
   const loadTrash = useCallback(async () => {
     setLoadingTrash(true)
     try {
-      const data = await filesApi.list(tripId, true)
+      const data = await fileRepo.list(tripId, true)
       setTrashFiles(data.files || [])
     } catch { /* */ }
     setLoadingTrash(false)
@@ -61,14 +61,14 @@ export function useFileManager({ files = [], onUpload, onDelete, onUpdate, place
 
   const handleStar = async (fileId: number) => {
     try {
-      await filesApi.toggleStar(tripId, fileId)
+      await fileRepo.toggleStar(fileId)
       refreshFiles()
     } catch { /* */ }
   }
 
   const handleRestore = async (fileId: number) => {
     try {
-      await filesApi.restore(tripId, fileId)
+      await fileRepo.restore(fileId)
       setTrashFiles(prev => prev.filter(f => f.id !== fileId))
       refreshFiles()
       toast.success(t('files.toast.restored'))
@@ -80,7 +80,7 @@ export function useFileManager({ files = [], onUpload, onDelete, onUpdate, place
   const handlePermanentDelete = async (fileId: number) => {
     if (!confirm(t('files.confirm.permanentDelete'))) return
     try {
-      await filesApi.permanentDelete(tripId, fileId)
+      await fileRepo.permanentDelete(fileId)
       setTrashFiles(prev => prev.filter(f => f.id !== fileId))
       toast.success(t('files.toast.deleted'))
     } catch {
@@ -91,7 +91,7 @@ export function useFileManager({ files = [], onUpload, onDelete, onUpdate, place
   const handleEmptyTrash = async () => {
     if (!confirm(t('files.confirm.emptyTrash'))) return
     try {
-      await filesApi.emptyTrash(tripId)
+      await fileRepo.emptyTrash(tripId)
       setTrashFiles([])
       toast.success(t('files.toast.trashEmptied') || 'Trash emptied')
     } catch {
@@ -179,7 +179,7 @@ export function useFileManager({ files = [], onUpload, onDelete, onUpdate, place
 
   const handleAssign = async (fileId: number, data: { place_id?: number | null; reservation_id?: number | null }) => {
     try {
-      await filesApi.update(tripId, fileId, data)
+      await fileRepo.update(fileId, data)
       refreshFiles()
     } catch {
       toast.error(t('files.toast.assignError'))

@@ -1,130 +1,77 @@
-# Local-first data and personal cloud sync
+# Local-first personal sync
 
-## 1. Current architecture
+## Current architecture
 
-TREK originally treats the server as the source of truth. Its existing Dexie database is an offline cache and its `mutationQueue` replays REST requests. In the standalone PWA, Trip, Day, Place, Assignment, Accommodation, Reservation, Expense/Budget, Todo, Packing and personal Vacay data now use repositories and IndexedDB.
-
-The migration proceeds by dependency boundary: Trip, Day, Place/Assignment, Accommodation/Reservation, Expense/Budget, then list and personal-planning modules. The legacy server cache sync remains intact for non-standalone TREK operation.
-
-## 2. Target architecture
+Supabase Auth owns identity and session. Every profile owns one Personal Workspace. Supabase is the authoritative cloud copy; the current user's scoped IndexedDB database is the complete working copy used by pages and repositories.
 
 ```text
-Page / component
-      ↓
-Store / hook
-      ↓
+Page / Store
+    ↓
 Repository
-      ↓
-IndexedDB (working database)
-      ↓
+    ↓
+IndexedDB + durable syncOutbox
+    ↓
 SyncManager
-      ↓
-SyncProvider
-      ├── GitHubSyncProvider
-      └── future cloud providers
+    ↓
+SupabaseSyncProvider
+    ↓
+Personal Workspace tables + sync_changes
 ```
 
-No UI write waits for a provider request. Provider errors affect sync status only.
+The former GitHub repository/PAT provider is removed. Dexie v15 deletes its local configuration and credential stores; v17 queues existing provider-neutral data once for import into Supabase.
 
-## 3. Data flow
+## Data flow
 
-Local write:
+- Local CRUD commits the business row and outbox entry in one IndexedDB transaction. UI success never waits for Supabase.
+- A restored session schedules sync at login. Local changes also debounce a sync; foregrounding the app, reconnecting the network and the manual button trigger it too.
+- A fresh device has cursor `0` and downloads the latest version of every cloud entity into IndexedDB.
+- Later runs query `sync_changes.cursor > local cursor`; no cloud change means no business rows are downloaded.
+- An offline failure leaves outbox rows intact. Recovery uploads them before pulling cloud incrementals.
+- Successful runs store the cloud cursor and `lastSyncAt` in IndexedDB `syncState`.
+
+## Responsibilities
+
+Repositories own local CRUD, UUID creation, timestamps, soft deletion and atomic outbox writes. They know neither Supabase tables nor sessions.
+
+IndexedDB owns the current user's working data, compatibility numeric IDs, `syncOutbox`, per-entity sync metadata and `syncState`. Databases remain user-scoped.
+
+`SyncManager` serializes provider-neutral domain documents, orders relationships, uploads pending changes, applies remote changes and advances the local cursor. A provider advertises `last-write-wins`; future providers can retain merge/conflict behavior.
+
+`SyncProvider` connects, pushes provider-neutral changes, pulls from an opaque cursor and reports status. Its optional attachment channel uploads/downloads binary objects without leaking Supabase concepts into repositories. `SupabaseSyncProvider` resolves the authenticated user's Personal Workspace, maps entity types to Supabase tables and never handles passwords or privileged keys.
+
+## Cloud schema
+
+Each business table contains:
 
 ```text
-Domain Repository transaction
-  ├── write the domain row
-  ├── upsert syncOutbox
-  └── mark entitySyncMeta pending
+id, workspace_id, created_by, updated_by,
+created_at, updated_at, revision, deleted_at, payload
 ```
 
-Sync performs pull before push. Remote changes are merged into IndexedDB, non-conflicting outbox entries are pushed, and sync metadata is updated only after the remote commit succeeds.
+Tables are `trips`, `trip_days`, `day_notes`, `places`, `assignments`, `accommodations`, `reservations`, `budget_items`, `todo_items`, `packing_bags`, `packing_items`, `packing_configs`, `trip_files`, and `vacay_records`.
 
-## 4. Repository responsibility
+Attachment metadata is a normal revisioned `trip_files` entity. Binary bodies use the private `trip-attachments` Storage bucket at `workspaceId/tripId/fileId/name`. Storage RLS checks the authenticated user's Workspace membership; no object is public. New uploads first enter the durable `tripFileBlobs` IndexedDB table, then the sync manager uploads the body before committing its metadata. A fresh device downloads both metadata and body into IndexedDB, so previously synchronized files remain available offline.
 
-Repositories own local business CRUD, timestamps, UUID creation, tombstones and the atomic creation of outbox entries. They do not know which provider is configured and contain no GitHub API logic.
+`sync_changes` is an append-only cursor log written by database triggers. It contains no separate client secret. RLS restricts every row and change-log query to Workspace members. The frontend uses only the Supabase URL and publishable key; authorization comes from the user's Supabase session and RLS.
 
-## 5. IndexedDB responsibility
+## Conflict and deletion policy
 
-Dexie is the working database and persists business rows, provider-neutral sync metadata, conflicts, provider configuration and device-local credentials. Versions 6–10 migrate the Trip graph through Expense/Budget; version 11 migrates Todo; version 12 migrates Packing items, bags and configuration; version 13 adds the personal Vacay aggregate. No migration clears existing data.
+Personal multi-device sync uses Last Write Wins: pending local changes are committed first, then the device pulls the latest server revisions. The last transaction accepted by Supabase becomes canonical. An edit made while a run is in flight remains pending for the next run and is never dropped.
 
-Numeric ids remain temporary local compatibility keys. `sync_id` is the canonical UUID exported to providers. Day and Place carry a Trip UUID; Assignment carries Trip, Day and Place UUIDs. Numeric ids are never exported.
+Deletes are tombstones. Repositories set `deleted_at`, retain the payload and enqueue `delete`; Supabase updates the row instead of physically deleting it. Deleting a Trip tombstones its migrated children in the same IndexedDB transaction.
 
-Version 7 adds Day UUIDs, parent UUIDs, timestamps and tombstones, then queues existing rows for their first provider sync. Orphaned legacy rows are marked with an `orphan:<numeric-id>` parent reference rather than silently deleted.
+## Schema migration
 
-Version 8 gives Place the same lifecycle metadata and extracts legacy Assignments embedded in cached Day rows into a dedicated table. Missing parent relations are marked as migration errors and are not uploaded. Category ids, ratings and participants remain local/server projections until those modules are migrated.
+Dexie upgrades are additive and preserve existing records. v16 extracts embedded DayNote items into a first-class table. v17 re-queues all valid existing rows for the one-time provider migration. v18 normalizes file UUID relationships and adds durable binary storage. Users must not clear browser storage to upgrade.
 
-Version 9 adds canonical UUIDs and relation UUIDs to Accommodation and Reservation, preserves numeric ids as local compatibility keys, and queues valid legacy rows for initial sync. Reservation day-position keys and day references nested in transport metadata are translated to Day UUIDs at the provider boundary. Traveler/account projections and external-service state are deliberately excluded from the portable payload.
+Supabase changes are committed as ordered SQL migrations. The base identity migration remains separate from personal data tables and DayNote coverage.
 
-Version 10 adds canonical UUIDs and Trip, Reservation and Place UUID relations to Expense/Budget rows. Member and payer names/amounts are portable snapshots, while provider-specific fields stay outside the domain model. Invalid legacy relations are retained locally, marked as migration errors and excluded from upload.
+## Trip boundary coverage
 
-Version 11 adds Todo UUIDs, Trip UUIDs, timestamps and tombstones. Version 12 gives Packing items and bags independent UUIDs, translates item-to-bag links to UUIDs and stores templates/category assignments in a provider-neutral personal configuration. Version 13 stores Vacay plan settings, years, entries, company holidays, entitlement and leave-year settings as a small personal aggregate; removed date entries retain tombstone timestamps. Version 14 adds a provider-neutral holiday cache keyed by country and year; this online-service cache is not part of GitHub business-data sync.
+The personal Trip sync boundary includes Trip (including uploaded cover photos), Day, individual DayNote/log cards, Place, day-place Assignment and transport fields, Accommodation, Reservation, Expense/Budget, Todo, Packing Bag, Packing Item, and file/photo metadata plus binary bodies. Primary and additional file-to-Place/Reservation links use UUID relationships. Personal packing templates/settings and Vacay data are Workspace-scoped aggregates outside a single Trip but use the same pipeline.
 
-## 6. SyncManager responsibility
+Live collaboration/chat/polls and Workspace sharing are intentionally outside the first personal multi-device phase. Plugin/MCP/Admin data, public-holiday caches, map tiles, exchange rates and other replaceable online-service caches are not personal Trip records and remain separate.
 
-`SyncManager` coordinates pull, conflict detection, local merge, push and status updates. It only consumes `SyncProvider`; it does not inspect repository names, GitHub paths or GitHub responses.
+## Future providers
 
-Triggers are app startup, foreground resume, offline-to-online, debounced local changes and manual sync.
-
-## 7. SyncProvider interface
-
-Providers implement `connect`, `disconnect`, `pull`, `push` and `getStatus`. Cursors and remote versions are opaque strings. Changes use only entity type, canonical UUID, operation, base version and domain payload.
-
-## 8. GitHubSyncProvider responsibility
-
-The GitHub provider validates access, initializes an empty repository, reads the manifest and Trip-scoped documents, maps Git state to opaque versions, and writes all changed files plus the manifest in one Git tree commit. The branch ref is advanced with `force: false`; a moved ref causes a pull/retry instead of an overwrite.
-
-## 9. GitHub data layout
-
-```text
-manifest.json
-trips/<trip-uuid>/trip.json
-trips/<trip-uuid>/days.json
-trips/<trip-uuid>/places.json
-trips/<trip-uuid>/assignments.json
-trips/<trip-uuid>/accommodations.json
-trips/<trip-uuid>/reservations.json
-trips/<trip-uuid>/expenses.json
-trips/<trip-uuid>/todos.json
-trips/<trip-uuid>/packing.json
-packing/settings.json
-vacay/plan.json
-```
-
-The manifest contains schema version and per-entity path, parent UUIDs, timestamps, tombstone and opaque content version. It does not duplicate domain payloads. Child entities are grouped by Trip in their respective files, while conflict metadata remains per entity.
-
-## 10. Sync sequence
-
-1. Check network and local configuration.
-2. Connect to the provider.
-3. Pull the remote cursor and manifest.
-4. Merge non-conflicting remote changes into IndexedDB.
-5. Persist conflicts without replacing either side.
-6. Read pending local outbox entries.
-7. Push non-conflicting entries atomically.
-8. Store remote versions, cursor and completion time.
-
-## 11. Conflict strategy
-
-If local and remote both changed since `remoteVersion`, the local entity remains the visible working copy. Local and remote snapshots are stored in `syncConflicts`, the entity and outbox are marked `conflict`, and that entity is not pushed. Resolution UI is intentionally deferred, but both versions are retained.
-
-## 12. Token strategy
-
-Owner, repository, branch and enabled state are device-local configuration. The fine-grained PAT is kept separately in IndexedDB and is excluded from exports, provider payloads, logs and builds. It must be limited to Contents read/write on the dedicated private data repository.
-
-A static PWA cannot protect a stored token from malicious code executing in the same origin. Least privilege, CSP and a dedicated repository are therefore part of the security boundary. OAuth or a GitHub App can later replace the credential source without changing repositories or SyncManager.
-
-## 13. Schema migration strategy
-
-All changes use Dexie version upgrades. Versions 6–10 cover the Trip graph through Expense/Budget; versions 11–13 add Todo, Packing and Vacay. No reinstall, storage clear or destructive migration is required. Tombstones are retained until a future garbage-collection policy is implemented.
-
-## 14. Future Supabase integration
-
-`SupabaseSyncProvider` will implement the same provider interface and translate opaque cursors/versions to its own change tracking. UI, Trip repository, IndexedDB tables and Trip payloads remain unchanged. Multiple providers can later use separate `syncState` rows; fan-out policy belongs above the provider, not in repositories.
-
-## Implemented boundary
-
-Trip, Day, Place, Assignment, Accommodation, Reservation, Expense/Budget, Todo, Packing and personal Vacay are migrated. Normal CRUD, toggles and ordering operations are local-first and sync through the provider-neutral outbox. Packing bags, item sharing snapshots, category assignments and personal templates persist locally; bags/items and configuration sync separately to reduce conflicts. Vacay date marking, company holidays, plan/year settings and entitlement work without the TREK Server. Chinese public holidays and makeup workdays are converted by `ChinaHolidayProvider` from NateScarlet/holiday-cn and cached in IndexedDB; official exceptions override the ordinary weekday/weekend rule. Historical and current ready data is retained, while next-year checks start in October and retry no more than weekly until official data exists.
-
-DayNote items, files, collaboration, Auth and server removal are not implemented. Day title and whole-day notes are fields of Day and are migrated; the separate DayNote item collection is not. Place image upload and collaborative rating, Assignment participants, Reservation travelers, booking parsing/import, upcoming-booking aggregation and external AirTrail refresh remain online-only enhancements. Expense settlement records and live exchange-rate refresh remain online services and are not included in GitHub sync. Vacay Fusion, invites and read-only sharing are disabled in personal mode. German public holidays have an offline calculator and Chinese public holidays have the cached provider above; other public/school-holiday feeds remain a future replaceable online service and never block personal date marking.
-
-The legacy TREK Server cache/WebSocket path remains for non-standalone use, but it is not part of the GitHub Pages core write path. “Clear offline data” retains all migrated working rows and only removes disposable, not-yet-migrated caches.
+A future cloud provider implements `SyncProvider` and consumes the same domain documents. Pages, repositories, IndexedDB tables and UUID relationships remain unchanged. Provider-specific row versions, table names and API responses must stay inside the provider.

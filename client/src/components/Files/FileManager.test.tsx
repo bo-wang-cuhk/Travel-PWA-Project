@@ -4,9 +4,10 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server } from '../../../tests/helpers/msw/server';
 import { useAuthStore } from '../../store/authStore';
+import { useSettingsStore } from '../../store/settingsStore';
 import { useTripStore } from '../../store/tripStore';
 import { resetAllStores, seedStore } from '../../../tests/helpers/store';
-import { buildUser, buildTrip } from '../../../tests/helpers/factories';
+import { buildUser, buildTrip, buildSettings } from '../../../tests/helpers/factories';
 import type { TripFile } from '../../types';
 import FileManager from './FileManager';
 
@@ -33,27 +34,19 @@ vi.mock('remark-gfm', () => ({ default: () => ({}) }));
 vi.mock('remark-breaks', () => ({ default: () => ({}) }));
 vi.mock('rehype-sanitize', () => ({ default: () => ({}) }));
 
-// Mock filesApi
-vi.mock('../../api/client', async (importOriginal) => {
-  const original = (await importOriginal()) as any;
-  return {
-    ...original,
-    filesApi: {
-      list: vi.fn().mockResolvedValue({ files: [] }),
-      toggleStar: vi.fn().mockResolvedValue({}),
-      restore: vi.fn().mockResolvedValue({}),
-      permanentDelete: vi.fn().mockResolvedValue({}),
-      emptyTrash: vi.fn().mockResolvedValue({}),
-      upload: vi.fn().mockResolvedValue({ file: { id: 99 } }),
-      update: vi.fn().mockResolvedValue({}),
-      addLink: vi.fn().mockResolvedValue({}),
-      removeLink: vi.fn().mockResolvedValue({}),
-      getLinks: vi.fn().mockResolvedValue({ links: [] }),
-    },
-  };
-});
+vi.mock('../../repo/fileRepo', () => ({
+  fileRepo: {
+    list: vi.fn().mockResolvedValue({ files: [] }),
+    toggleStar: vi.fn().mockResolvedValue({}),
+    restore: vi.fn().mockResolvedValue({}),
+    trash: vi.fn().mockResolvedValue({}),
+    permanentDelete: vi.fn().mockResolvedValue({}),
+    emptyTrash: vi.fn().mockResolvedValue({}),
+    update: vi.fn().mockResolvedValue({}),
+  },
+}));
 
-import { filesApi } from '../../api/client';
+import { fileRepo } from '../../repo/fileRepo';
 
 const buildFile = (overrides: Partial<TripFile> = {}): TripFile => ({
   id: 1,
@@ -89,8 +82,12 @@ const defaultProps = {
 beforeEach(() => {
   resetAllStores();
   vi.clearAllMocks();
+  vi.mocked(fileRepo.list).mockResolvedValue({ files: [] });
   // Seed auth as admin so useCanDo() returns true for all permissions
   seedStore(useAuthStore, { user: buildUser({ role: 'admin' }), isAuthenticated: true });
+  // This suite asserts the English accessible labels. The product default is
+  // Chinese, so pin the locale explicitly instead of depending on test order.
+  seedStore(useSettingsStore, { settings: buildSettings({ language: 'en' }) });
   seedStore(useTripStore, { trip: buildTrip({ id: 1 }) });
 
   // Default trash endpoint
@@ -158,12 +155,12 @@ describe('FileManager', () => {
     const starBtn = screen.getByTitle(/star/i);
     await user.click(starBtn);
 
-    expect(filesApi.toggleStar).toHaveBeenCalledWith(1, 1);
+    expect(fileRepo.toggleStar).toHaveBeenCalledWith(1);
   });
 
   it('FE-COMP-FILEMANAGER-006: trash toggle loads and displays trashed files', async () => {
     // filesApi.list is mocked — configure it to return trash files when called with trash=true
-    (filesApi.list as ReturnType<typeof vi.fn>).mockImplementation((_tripId, trash) => {
+    (fileRepo.list as ReturnType<typeof vi.fn>).mockImplementation((_tripId, trash) => {
       if (trash) return Promise.resolve({ files: [buildFile({ id: 5, original_name: 'old.pdf', deleted_at: '2025-02-01' })] });
       return Promise.resolve({ files: [] });
     });
@@ -180,7 +177,7 @@ describe('FileManager', () => {
   });
 
   it('FE-COMP-FILEMANAGER-007: restore button calls filesApi.restore', async () => {
-    (filesApi.list as ReturnType<typeof vi.fn>).mockImplementation((_tripId, trash) => {
+    (fileRepo.list as ReturnType<typeof vi.fn>).mockImplementation((_tripId, trash) => {
       if (trash) return Promise.resolve({ files: [buildFile({ id: 5, original_name: 'old.pdf', deleted_at: '2025-02-01' })] });
       return Promise.resolve({ files: [] });
     });
@@ -197,11 +194,11 @@ describe('FileManager', () => {
     const restoreBtn = screen.getByTitle(/restore/i);
     await user.click(restoreBtn);
 
-    expect(filesApi.restore).toHaveBeenCalledWith(1, 5);
+    expect(fileRepo.restore).toHaveBeenCalledWith(5);
   });
 
   it('FE-COMP-FILEMANAGER-008: permanent delete calls filesApi.permanentDelete after confirm', async () => {
-    (filesApi.list as ReturnType<typeof vi.fn>).mockImplementation((_tripId, trash) => {
+    (fileRepo.list as ReturnType<typeof vi.fn>).mockImplementation((_tripId, trash) => {
       if (trash) return Promise.resolve({ files: [buildFile({ id: 5, original_name: 'old.pdf', deleted_at: '2025-02-01' })] });
       return Promise.resolve({ files: [] });
     });
@@ -217,11 +214,11 @@ describe('FileManager', () => {
     const deleteBtn = screen.getByTitle(/delete/i);
     await user.click(deleteBtn);
 
-    expect(filesApi.permanentDelete).toHaveBeenCalledWith(1, 5);
+    expect(fileRepo.permanentDelete).toHaveBeenCalledWith(5);
   });
 
   it('FE-COMP-FILEMANAGER-009: empty trash calls filesApi.emptyTrash', async () => {
-    (filesApi.list as ReturnType<typeof vi.fn>).mockImplementation((_tripId, trash) => {
+    (fileRepo.list as ReturnType<typeof vi.fn>).mockImplementation((_tripId, trash) => {
       if (trash) return Promise.resolve({ files: [buildFile({ id: 5, original_name: 'old.pdf', deleted_at: '2025-02-01' })] });
       return Promise.resolve({ files: [] });
     });
@@ -237,7 +234,7 @@ describe('FileManager', () => {
     const emptyTrashBtn = await screen.findByText(/empty trash/i);
     await user.click(emptyTrashBtn);
 
-    expect(filesApi.emptyTrash).toHaveBeenCalledWith(1);
+    expect(fileRepo.emptyTrash).toHaveBeenCalledWith(1);
   });
 
   it('FE-COMP-FILEMANAGER-010: image file click opens lightbox', async () => {
@@ -463,7 +460,7 @@ describe('FileManager', () => {
     // Click on the place button to link it
     await user.click(screen.getByText('Louvre Museum'));
 
-    expect(filesApi.update).toHaveBeenCalledWith(1, 1, { place_id: 10 });
+    expect(fileRepo.update).toHaveBeenCalledWith(1, { place_id: 10 });
   });
 
   it('FE-COMP-FILEMANAGER-025: clicking a reservation in assign modal calls filesApi.update', async () => {
@@ -480,7 +477,7 @@ describe('FileManager', () => {
     // Click on the reservation button to link it
     await user.click(screen.getByText('Train Ticket'));
 
-    expect(filesApi.update).toHaveBeenCalledWith(1, 1, { reservation_id: 20 });
+    expect(fileRepo.update).toHaveBeenCalledWith(1, { reservation_id: 20 });
   });
 
   it('FE-COMP-FILEMANAGER-026: assign modal with both places and reservations shows both sections', async () => {
@@ -572,7 +569,7 @@ describe('FileManager', () => {
 
     // Clicking the linked place should unlink it
     await user.click(screen.getByText('Venice Beach'));
-    expect(filesApi.update).toHaveBeenCalledWith(1, 1, { place_id: null });
+    expect(fileRepo.update).toHaveBeenCalledWith(1, { place_id: null });
   });
 
   it('FE-COMP-FILEMANAGER-032: unlink reservation from assign modal calls filesApi.update', async () => {
@@ -589,7 +586,7 @@ describe('FileManager', () => {
 
     // Clicking the linked reservation should unlink it
     await user.click(screen.getByText('Museum Pass'));
-    expect(filesApi.update).toHaveBeenCalledWith(1, 1, { reservation_id: null });
+    expect(fileRepo.update).toHaveBeenCalledWith(1, { reservation_id: null });
   });
 
   it('FE-COMP-FILEMANAGER-033: opening PDF preview and closing via backdrop', async () => {

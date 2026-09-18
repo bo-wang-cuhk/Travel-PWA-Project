@@ -1,6 +1,7 @@
-import { GitHubSyncProvider, RemoteAdvancedError } from './providers/github/GitHubSyncProvider'
+import { getSupabaseClient, SUPABASE_AUTH_ENABLED } from '../auth/supabaseClient'
+import { SupabaseSyncProvider } from './providers/supabase/SupabaseSyncProvider'
 import { SyncManager, type SyncRunResult } from './SyncManager'
-import { syncSettingsRepository } from './syncSettingsRepository'
+import { useTripStore } from '../store/tripStore'
 
 export type ConfiguredSyncResult =
   | { status: 'done'; result: SyncRunResult }
@@ -16,18 +17,15 @@ function announce(): void {
 
 async function runConfiguredSync(): Promise<ConfiguredSyncResult> {
   if (typeof navigator !== 'undefined' && !navigator.onLine) return { status: 'skipped', reason: 'offline' }
-  const { config, token } = await syncSettingsRepository.getGitHub()
-  if (!config.enabled) return { status: 'skipped', reason: 'disabled' }
-  if (!config.owner || !config.repository || !config.branch || !token) return { status: 'skipped', reason: 'unconfigured' }
-
-  const run = () => new SyncManager(new GitHubSyncProvider(config, token)).sync()
+  if (!SUPABASE_AUTH_ENABLED) return { status: 'skipped', reason: 'unconfigured' }
+  const { data } = await getSupabaseClient().auth.getSession()
+  if (!data.session) return { status: 'skipped', reason: 'unconfigured' }
   try {
-    return { status: 'done', result: await run() }
-  } catch (error) {
-    // The branch advanced between pull and ref update. Pull and merge once more;
-    // a true same-entity collision will now be persisted as a conflict.
-    if (error instanceof RemoteAdvancedError) return { status: 'done', result: await run() }
-    throw error
+    const result = await new SyncManager(new SupabaseSyncProvider()).sync()
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('travel-sync-complete'))
+    const activeTripId = useTripStore.getState().trip?.id
+    if (activeTripId != null) void useTripStore.getState().loadTrip(activeTripId).catch(console.error)
+    return { status: 'done', result }
   } finally {
     announce()
   }

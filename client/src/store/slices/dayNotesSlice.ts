@@ -1,5 +1,5 @@
-import { dayNotesApi } from '../../api/client'
 import { dayRepo } from '../../repo/dayRepo'
+import { dayNoteRepo } from '../../repo/dayNoteRepo'
 import type { StoreApi } from 'zustand'
 import type { TripStoreState } from '../tripStore'
 import type { DayNote } from '../../types'
@@ -41,37 +41,23 @@ export const createDayNotesSlice = (set: SetState, get: GetState): DayNotesSlice
   },
 
   addDayNote: async (tripId, dayId, data) => {
-    const tempId = Date.now() * -1
-    const tempNote: DayNote = { id: tempId, day_id: dayId as number, ...data, created_at: new Date().toISOString() } as DayNote
-    set(state => ({
-      dayNotes: {
-        ...state.dayNotes,
-        [String(dayId)]: [...(state.dayNotes[String(dayId)] || []), tempNote],
-      }
-    }))
     try {
-      const result = await dayNotesApi.create(tripId, dayId, data)
+      const result = await dayNoteRepo.create(Number(tripId), Number(dayId), data)
       set(state => ({
         dayNotes: {
           ...state.dayNotes,
-          [String(dayId)]: (state.dayNotes[String(dayId)] || []).map(n => n.id === tempId ? result.note : n),
+          [String(dayId)]: [...(state.dayNotes[String(dayId)] || []), result.note],
         }
       }))
       return result.note
     } catch (err: unknown) {
-      set(state => ({
-        dayNotes: {
-          ...state.dayNotes,
-          [String(dayId)]: (state.dayNotes[String(dayId)] || []).filter(n => n.id !== tempId),
-        }
-      }))
       throw new Error(getApiErrorMessage(err, 'Error adding note'))
     }
   },
 
   updateDayNote: async (tripId, dayId, id, data) => {
     try {
-      const result = await dayNotesApi.update(tripId, dayId, id, data)
+      const result = await dayNoteRepo.update(Number(tripId), Number(dayId), id, data)
       set(state => ({
         dayNotes: {
           ...state.dayNotes,
@@ -85,17 +71,15 @@ export const createDayNotesSlice = (set: SetState, get: GetState): DayNotesSlice
   },
 
   deleteDayNote: async (tripId, dayId, id) => {
-    const prev = get().dayNotes
-    set(state => ({
-      dayNotes: {
-        ...state.dayNotes,
-        [String(dayId)]: (state.dayNotes[String(dayId)] || []).filter(n => n.id !== id),
-      }
-    }))
     try {
-      await dayNotesApi.delete(tripId, dayId, id)
+      await dayNoteRepo.delete(Number(tripId), Number(dayId), id)
+      set(state => ({
+        dayNotes: {
+          ...state.dayNotes,
+          [String(dayId)]: (state.dayNotes[String(dayId)] || []).filter(n => n.id !== id),
+        }
+      }))
     } catch (err: unknown) {
-      set({ dayNotes: prev })
       throw new Error(getApiErrorMessage(err, 'Error deleting note'))
     }
   },
@@ -113,23 +97,7 @@ export const createDayNotesSlice = (set: SetState, get: GetState): DayNotesSlice
     }))
 
     try {
-      // There is no atomic move on the server, so the destructive half goes last:
-      // if the create were second and failed, the note would already be gone for
-      // good and the rollback below would only fake it back into the store.
-      // Every field the note carries, not just the ones it had when this was
-      // written: a move is a delete plus a create, so anything omitted here is
-      // silently dropped — which is how a coloured note lost its colour on the
-      // way to another day (#1629).
-      const result = await dayNotesApi.create(tripId, toDayId, {
-        text: note.text, time: note.time, icon: note.icon, color: note.color ?? null, sort_order,
-      })
-      try {
-        await dayNotesApi.delete(tripId, fromDayId, noteId)
-      } catch (delErr: unknown) {
-        // The source survived, so drop the copy rather than leave a duplicate behind.
-        await dayNotesApi.delete(tripId, toDayId, result.note.id).catch(() => {})
-        throw delErr
-      }
+      const result = await dayNoteRepo.move(Number(tripId), Number(fromDayId), Number(toDayId), noteId, sort_order)
       set(s => ({
         dayNotes: {
           ...s.dayNotes,

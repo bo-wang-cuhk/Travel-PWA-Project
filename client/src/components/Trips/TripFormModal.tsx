@@ -14,6 +14,8 @@ import { getApiErrorMessage, type Trip } from '../../types'
 import type { TripCreateRequest } from '@trek/shared'
 import { NumericInput } from '../shared/NumericInput'
 import { currenciesWith, SYMBOLS } from '../Budget/BudgetPanel.constants'
+import { fileRepo } from '../../repo/fileRepo'
+import { tripRepo } from '../../repo/tripRepo'
 
 type DateShiftMode = 'keep_bookings' | 'shift_all'
 
@@ -197,17 +199,16 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
       // Upload pending cover for newly created trips
       if (pendingCoverFile && createdTrip?.id) {
         try {
-          const fd = new FormData()
-          fd.append('cover', pendingCoverFile)
-          const data = await tripsApi.uploadCover(createdTrip.id, fd)
-          onCoverUpdate?.(createdTrip.id, data.cover_image)
+          const cover = await fileRepo.saveTripCover(createdTrip.id, pendingCoverFile)
+          await tripRepo.update(createdTrip.id, { cover_image: cover.storedValue })
+          onCoverUpdate?.(createdTrip.id, cover.displayUrl)
         } catch {
           // Cover upload failed but trip was created — surface it without blocking the create
           toast.error(t('dashboard.coverUploadError'))
         }
       } else if (pendingUnsplashUrl && createdTrip?.id) {
         try {
-          await tripsApi.update(createdTrip.id, { cover_image: pendingUnsplashUrl })
+          await tripRepo.update(createdTrip.id, { cover_image: pendingUnsplashUrl })
           onCoverUpdate?.(createdTrip.id, pendingUnsplashUrl)
         } catch {
           toast.error(t('dashboard.coverSaveError'))
@@ -246,11 +247,10 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
   const uploadCoverNow = async (file: File) => {
     setUploadingCover(true)
     try {
-      const fd = new FormData()
-      fd.append('cover', file)
-      const data = await tripsApi.uploadCover(trip.id, fd)
-      setCoverPreview(data.cover_image)
-      onCoverUpdate?.(trip.id, data.cover_image)
+      const cover = await fileRepo.saveTripCover(trip.id, file)
+      await tripRepo.update(trip.id, { cover_image: cover.storedValue })
+      setCoverPreview(cover.displayUrl)
+      onCoverUpdate?.(trip.id, cover.displayUrl)
       toast.success(t('dashboard.coverSaved'))
     } catch {
       toast.error(t('dashboard.coverUploadError'))
@@ -290,7 +290,7 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
     if (isEditing && trip?.id) {
       setUploadingCover(true)
       try {
-        await tripsApi.update(trip.id, { cover_image: photo.url })
+        await tripRepo.update(trip.id, { cover_image: photo.url })
         setCoverPreview(photo.url)
         onCoverUpdate?.(trip.id, photo.url)
         toast.success(t('dashboard.coverSaved'))
@@ -314,7 +314,7 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
     }
     // Nothing pending left, so the preview is a saved trip's stored cover.
     try {
-      await tripsApi.update(trip.id, { cover_image: null })
+      await tripRepo.update(trip.id, { cover_image: null })
       setCoverPreview(null)
       onCoverUpdate?.(trip.id, null)
     } catch {

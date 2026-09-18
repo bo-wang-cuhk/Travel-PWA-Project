@@ -15,6 +15,8 @@ import type { Trip, TripCreateRequest } from '@trek/shared'
 import MSheet from '../../components/MSheet'
 import MIconBtn from '../../components/MIconBtn'
 import MListRow from '../../components/MListRow'
+import { fileRepo } from '../../../repo/fileRepo'
+import { tripRepo } from '../../../repo/tripRepo'
 
 interface CoverSearchPhoto {
   id: string
@@ -128,16 +130,15 @@ export default function MNewTripSheet({ open, trip, onClose, onSave, onCoverUpda
       const created = result ? result.trip : undefined
       if (pendingCoverFile && created?.id) {
         try {
-          const fd = new FormData()
-          fd.append('cover', pendingCoverFile)
-          const data = await tripsApi.uploadCover(created.id, fd)
-          onCoverUpdate?.(created.id, data.cover_image)
+          const cover = await fileRepo.saveTripCover(created.id, pendingCoverFile)
+          await tripRepo.update(created.id, { cover_image: cover.storedValue })
+          onCoverUpdate?.(created.id, cover.displayUrl)
         } catch {
           toast.error(t('dashboard.coverUploadError'))
         }
       } else if (pendingUnsplashUrl && created?.id) {
         try {
-          await tripsApi.update(created.id, { cover_image: pendingUnsplashUrl })
+          await tripRepo.update(created.id, { cover_image: pendingUnsplashUrl })
           onCoverUpdate?.(created.id, pendingUnsplashUrl)
         } catch {
           toast.error(t('dashboard.coverSaveError'))
@@ -158,11 +159,10 @@ export default function MNewTripSheet({ open, trip, onClose, onSave, onCoverUpda
     if (isEditing && trip?.id) {
       setUploadingCover(true)
       try {
-        const fd = new FormData()
-        fd.append('cover', normalized)
-        const data = await tripsApi.uploadCover(trip.id, fd)
-        setCoverPreview(data.cover_image)
-        onCoverUpdate?.(trip.id, data.cover_image)
+        const cover = await fileRepo.saveTripCover(trip.id, normalized)
+        await tripRepo.update(trip.id, { cover_image: cover.storedValue })
+        setCoverPreview(cover.displayUrl)
+        onCoverUpdate?.(trip.id, cover.displayUrl)
         toast.success(t('dashboard.coverSaved'))
       } catch {
         toast.error(t('dashboard.coverUploadError'))
@@ -202,7 +202,7 @@ export default function MNewTripSheet({ open, trip, onClose, onSave, onCoverUpda
     if (isEditing && trip?.id) {
       setUploadingCover(true)
       try {
-        await tripsApi.update(trip.id, { cover_image: photo.url })
+        await tripRepo.update(trip.id, { cover_image: photo.url })
         setCoverPreview(photo.url)
         onCoverUpdate?.(trip.id, photo.url)
         toast.success(t('dashboard.coverSaved'))
@@ -227,7 +227,7 @@ export default function MNewTripSheet({ open, trip, onClose, onSave, onCoverUpda
     // Anything else is a cover stored on the trip, so this is the edit sheet.
     const id = trip!.id
     try {
-      await tripsApi.update(id, { cover_image: null })
+      await tripRepo.update(id, { cover_image: null })
       setCoverPreview(null)
       onCoverUpdate?.(id, null)
     } catch {

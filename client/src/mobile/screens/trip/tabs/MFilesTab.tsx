@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent } fr
 import { Link, Loader2, MoreVertical, Star } from 'lucide-react'
 import MDancingTrek from '../../../components/MDancingTrek'
 import { useTranslation, translateApiError } from '../../../../i18n'
-import { filesApi } from '../../../../api/client'
+import { fileRepo } from '../../../../repo/fileRepo'
 import { openFile } from '../../../../utils/fileDownload'
 import { isMedia, formatSize } from '../../../../components/Files/FileManager.helpers'
 import type { TripFile } from '../../../../types'
@@ -113,7 +113,7 @@ export default function MFilesTab({ planner, shell }: MTabScreenProps) {
   // ── Star toggle (ungated, §7.6) — direct filesApi call + store refresh, same as §7.3. ──
   const toggleStar = async (file: TripFile) => {
     try {
-      await filesApi.toggleStar(planner.tripId, file.id)
+      await fileRepo.toggleStar(file.id)
       planner.tripActions.loadFiles(planner.tripId)
     } catch {
       planner.toast.error(t('files.toast.assignError'))

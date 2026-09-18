@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { clearAll, offlineDb } from '../db/offlineDb'
 import { tripRepo } from '../repo/tripRepo'
 import { dayRepo } from '../repo/dayRepo'
+import { dayNoteRepo } from '../repo/dayNoteRepo'
 import { placeRepo } from '../repo/placeRepo'
 import { assignmentRepo } from '../repo/assignmentRepo'
 import { accommodationRepo } from '../repo/accommodationRepo'
@@ -11,15 +12,20 @@ import { budgetRepo } from '../repo/budgetRepo'
 import { todoRepo } from '../repo/todoRepo'
 import { packingRepo } from '../repo/packingRepo'
 import { vacayRepo } from '../repo/vacayRepo'
+import { fileRepo } from '../repo/fileRepo'
 import type { LocalChange, ProviderStatus, PushResult, RemoteChanges, SyncEntityType, SyncProvider } from './types'
+import type { TripFile } from '../types'
 import { SyncManager } from './SyncManager'
 
 class MemoryProvider implements SyncProvider {
-  readonly id = 'memory'
+  readonly id: string
   connected = false
   fail = false
   cursor = 0
   remote = new Map<string, { entityType: SyncEntityType; version: string; deleted: boolean; payload?: unknown }>()
+  attachments = new Map<string, Blob>()
+
+  constructor(id = 'memory') { this.id = id }
 
   async connect(): Promise<ProviderStatus> {
     if (this.fail) throw new Error('provider unavailable')
@@ -28,6 +34,12 @@ class MemoryProvider implements SyncProvider {
   }
   async disconnect(): Promise<void> { this.connected = false }
   async getStatus(): Promise<ProviderStatus> { return { connected: this.connected } }
+  async uploadAttachment(path: string, blob: Blob): Promise<void> { this.attachments.set(path, blob) }
+  async downloadAttachment(path: string): Promise<Blob> {
+    const blob = this.attachments.get(path)
+    if (!blob) throw new Error('attachment missing')
+    return blob
+  }
   async pull(cursor?: string | null): Promise<RemoteChanges> {
     if (this.fail) throw new Error('provider unavailable')
     const current = `c${this.cursor}`
@@ -64,9 +76,35 @@ class MemoryProvider implements SyncProvider {
   }
 }
 
+class LastWriteWinsProvider extends MemoryProvider {
+  readonly syncMode = 'last-write-wins' as const
+  constructor() { super('supabase') }
+}
+
 beforeEach(async () => { await clearAll() })
 
 describe('local-first SyncManager', () => {
+  it('syncs attachment metadata and binary body to a fresh device', async () => {
+    if (!URL.createObjectURL) Object.defineProperty(URL, 'createObjectURL', { value: () => 'blob:test' })
+    const provider = new LastWriteWinsProvider()
+    const trip = (await tripRepo.create({ title: 'Files', day_count: 0 })).trip
+    const form = new FormData()
+    form.append('file', new File(['ticket'], 'ticket.pdf', { type: 'application/pdf' }))
+    const local = (await fileRepo.create(trip.id, form)).file as TripFile & { sync_id: string; storage_path: string }
+    expect((await offlineDb.syncOutbox.toArray()).map(row => row.entityType)).toContain('tripFile')
+    expect(await offlineDb.tripFileBlobs.get(local.sync_id)).toBeTruthy()
+    await new SyncManager(provider).sync()
+    expect(provider.attachments.size).toBe(1)
+
+    await clearAll()
+    await new SyncManager(provider).sync()
+    const pulledTrip = (await tripRepo.list()).trips[0]
+    const pulled = (await fileRepo.list(pulledTrip.id)).files[0] as typeof local
+    expect(pulled.original_name).toBe('ticket.pdf')
+    expect(await offlineDb.tripFileBlobs.get(pulled.sync_id)).toBeTruthy()
+    expect(pulled.file_size).toBe(6)
+  })
+
   it('Scenario A: local Trip is pushed after IndexedDB has already accepted it', async () => {
     const provider = new MemoryProvider()
     const created = await tripRepo.create({ title: 'Tokyo', day_count: 0 })
@@ -132,6 +170,23 @@ describe('local-first SyncManager', () => {
     expect(provider.remote.get(created.trip.sync_id)?.payload).toMatchObject({ title: 'Remote' })
   })
 
+  it('Supabase LWW uploads pending data first and never creates a manual conflict', async () => {
+    const provider = new LastWriteWinsProvider()
+    const created = await tripRepo.create({ title: 'Base', day_count: 0 })
+    await new SyncManager(provider).sync()
+    await tripRepo.update(created.trip.id, { title: 'Last local write' })
+    const remote = provider.remote.get(created.trip.sync_id)!.payload as Record<string, unknown>
+    provider.editRemote(created.trip.sync_id, { ...remote, title: 'Earlier remote write' })
+
+    const result = await new SyncManager(provider).sync()
+
+    expect(result.conflicts).toBe(0)
+    expect(provider.remote.get(created.trip.sync_id)?.payload).toMatchObject({ title: 'Last local write' })
+    expect((await tripRepo.get(created.trip.id)).trip.title).toBe('Last local write')
+    expect(await offlineDb.syncConflicts.count()).toBe(0)
+    expect(await offlineDb.syncOutbox.count()).toBe(0)
+  })
+
   it('propagates a remote tombstone without physically deleting the local row', async () => {
     const provider = new MemoryProvider()
     const created = await tripRepo.create({ title: 'Temporary', day_count: 0 })
@@ -163,6 +218,24 @@ describe('local-first SyncManager', () => {
     expect(pulledDays).toHaveLength(1)
     expect(pulledDays[0]).toMatchObject({ sync_id: day.day.sync_id, trip_sync_id: trip.trip.sync_id, notes: 'Food tour' })
     expect(pulledDays[0].id).toBeLessThan(0)
+  })
+
+  it('pushes and pulls individual Day notes as first-class itinerary data', async () => {
+    const provider = new LastWriteWinsProvider()
+    const { trip } = await tripRepo.create({ title: 'Notebook', day_count: 1 })
+    const day = (await dayRepo.list(trip.id)).days[0]
+    const { note } = await dayNoteRepo.create(trip.id, day.id, { text: 'Train at nine', color: '#fff4cc' })
+
+    await new SyncManager(provider).sync()
+    expect(provider.remote.get(note.sync_id)?.payload).toMatchObject({
+      tripId: trip.sync_id, dayId: (await offlineDb.days.get(day.id))!.sync_id, text: 'Train at nine',
+    })
+
+    await clearAll()
+    await new SyncManager(provider).sync()
+    const pulledTrip = (await tripRepo.list()).trips[0]
+    const pulledDay = (await dayRepo.list(pulledTrip.id)).days[0]
+    expect(pulledDay.notes_items).toMatchObject([{ text: 'Train at nine', color: '#fff4cc' }])
   })
 
   it('retains both versions when the same Day changes locally and remotely', async () => {

@@ -258,7 +258,7 @@ describe('offlineDb — blob cache budget', () => {
     expect(await offlineDb.todoItems.count()).toBe(1)
     expect(await offlineDb.budgetItems.count()).toBe(1)
     expect(await offlineDb.reservations.count()).toBe(1)
-    expect(await offlineDb.tripFiles.count()).toBe(0)
+    expect(await offlineDb.tripFiles.count()).toBe(1)
     expect(await offlineDb.accommodations.count()).toBe(1)
     expect(await offlineDb.tripMembers.count()).toBe(0)
     expect(await offlineDb.syncMeta.get(1)).toBeUndefined()

@@ -49,7 +49,7 @@ export default function OfflineBanner(): React.ReactElement | null {
   }, [])
 
   // Standalone is intentionally "offline" from the legacy TREK Server's point
-  // of view, even while GitHub sync and online services are reachable. A plain
+  // of view, even while cloud sync and online services are reachable. A plain
   // Offline pill is therefore misleading in the personal PWA. Keep actionable
   // queue failures/conflicts (and queued legacy mutations) visible.
   const hasActionableState = pendingCount > 0 || failedCount > 0 || conflictCount > 0

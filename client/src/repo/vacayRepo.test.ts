@@ -21,7 +21,7 @@ describe('vacayRepo local-first', () => {
     expect((await vacayRepo.getStats(2027)).stats[0].vacation_days).toBe(25); expect((await vacayRepo.getYearSettings()).settings.year_type).toBe('fiscal')
   })
 
-  it('queues one provider-neutral aggregate for GitHub synchronization', async () => {
+  it('queues one provider-neutral aggregate for cloud synchronization', async () => {
     await vacayRepo.updatePlan({ block_weekends: false })
     expect((await offlineDb.syncOutbox.get('vacay:personal-vacay'))?.operation).toBe('upsert')
   })

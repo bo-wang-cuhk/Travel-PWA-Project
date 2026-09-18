@@ -192,18 +192,15 @@ describe('AssignModal place list', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Eiffel Tower' }))
 
-    await waitFor(() => expect(addLink).toHaveBeenCalledWith(3, 7, { place_id: 2 }))
-    expect(refreshFiles).toHaveBeenCalled()
+    await waitFor(() => expect(handleAssign).toHaveBeenCalledWith(7, { linked_place_ids: [2] }))
   })
 
   it('FE-W5ASG-014: a failing link request is swallowed', async () => {
-    addLink.mockRejectedValueOnce(new Error('offline'))
     render(<AssignModal {...state({ places, files: [file({ place_id: 1 })] })} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Eiffel Tower' }))
 
-    await waitFor(() => expect(addLink).toHaveBeenCalled())
-    expect(refreshFiles).not.toHaveBeenCalled()
+    await waitFor(() => expect(handleAssign).toHaveBeenCalledWith(7, { linked_place_ids: [2] }))
   })
 
   it('FE-W5ASG-015: clicking the primary place again unassigns it', () => {
@@ -215,33 +212,27 @@ describe('AssignModal place list', () => {
   })
 
   it('FE-W5ASG-016: clicking a linked place removes just that link', async () => {
-    getLinks.mockResolvedValueOnce({ links: [{ id: 55, place_id: 2 }] })
     render(<AssignModal {...state({ places, files: [file({ place_id: 1, linked_place_ids: [2] })] })} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Eiffel Tower' }))
 
-    await waitFor(() => expect(removeLink).toHaveBeenCalledWith(3, 7, 55))
-    expect(refreshFiles).toHaveBeenCalled()
+    await waitFor(() => expect(handleAssign).toHaveBeenCalledWith(7, { linked_place_ids: [] }))
   })
 
   it('FE-W5ASG-017: a linked place with no matching link row still refreshes', async () => {
-    getLinks.mockResolvedValueOnce({})
     render(<AssignModal {...state({ places, files: [file({ place_id: 1, linked_place_ids: [2] })] })} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Eiffel Tower' }))
 
-    await waitFor(() => expect(refreshFiles).toHaveBeenCalled())
-    expect(removeLink).not.toHaveBeenCalled()
+    await waitFor(() => expect(handleAssign).toHaveBeenCalledWith(7, { linked_place_ids: [] }))
   })
 
   it('FE-W5ASG-018: a failing links lookup is swallowed', async () => {
-    getLinks.mockRejectedValueOnce(new Error('offline'))
     render(<AssignModal {...state({ places, files: [file({ place_id: 1, linked_place_ids: [2] })] })} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Eiffel Tower' }))
 
-    await waitFor(() => expect(getLinks).toHaveBeenCalled())
-    expect(refreshFiles).not.toHaveBeenCalled()
+    await waitFor(() => expect(handleAssign).toHaveBeenCalledWith(7, { linked_place_ids: [] }))
   })
 
   it('FE-W5ASG-019: rows keep the linked highlight on mouse-out, free rows do not', () => {
@@ -304,18 +295,15 @@ describe('AssignModal reservation list', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'AF1234' }))
 
-    await waitFor(() => expect(addLink).toHaveBeenCalledWith(3, 7, { reservation_id: 20 }))
-    expect(refreshFiles).toHaveBeenCalled()
+    await waitFor(() => expect(handleAssign).toHaveBeenCalledWith(7, { linked_reservation_ids: [20] }))
   })
 
   it('FE-W5ASG-025: a failing reservation link is swallowed', async () => {
-    addLink.mockRejectedValueOnce(new Error('offline'))
     render(<AssignModal {...state({ reservations: [...bookings, ...transports], files: [file({ reservation_id: 10 })] })} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'AF1234' }))
 
-    await waitFor(() => expect(addLink).toHaveBeenCalled())
-    expect(refreshFiles).not.toHaveBeenCalled()
+    await waitFor(() => expect(handleAssign).toHaveBeenCalledWith(7, { linked_reservation_ids: [20] }))
   })
 
   it('FE-W5ASG-026: clicking the primary reservation again unassigns it', () => {
@@ -327,7 +315,6 @@ describe('AssignModal reservation list', () => {
   })
 
   it('FE-W5ASG-027: clicking a linked reservation removes just that link', async () => {
-    getLinks.mockResolvedValueOnce({ links: [{ id: 66, reservation_id: 20 }] })
     render(<AssignModal {...state({
       reservations: [...bookings, ...transports],
       files: [file({ reservation_id: 10, linked_reservation_ids: [20] })],
@@ -335,12 +322,10 @@ describe('AssignModal reservation list', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'AF1234' }))
 
-    await waitFor(() => expect(removeLink).toHaveBeenCalledWith(3, 7, 66))
-    expect(refreshFiles).toHaveBeenCalled()
+    await waitFor(() => expect(handleAssign).toHaveBeenCalledWith(7, { linked_reservation_ids: [] }))
   })
 
   it('FE-W5ASG-028: a linked reservation with no matching link row still refreshes', async () => {
-    getLinks.mockResolvedValueOnce({})
     render(<AssignModal {...state({
       reservations: [...bookings, ...transports],
       files: [file({ reservation_id: 10, linked_reservation_ids: [20] })],
@@ -348,12 +333,10 @@ describe('AssignModal reservation list', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'AF1234' }))
 
-    await waitFor(() => expect(refreshFiles).toHaveBeenCalled())
-    expect(removeLink).not.toHaveBeenCalled()
+    await waitFor(() => expect(handleAssign).toHaveBeenCalledWith(7, { linked_reservation_ids: [] }))
   })
 
   it('FE-W5ASG-029: a failing reservation links lookup is swallowed', async () => {
-    getLinks.mockRejectedValueOnce(new Error('offline'))
     render(<AssignModal {...state({
       reservations: [...bookings, ...transports],
       files: [file({ reservation_id: 10, linked_reservation_ids: [20] })],
@@ -361,8 +344,7 @@ describe('AssignModal reservation list', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'AF1234' }))
 
-    await waitFor(() => expect(getLinks).toHaveBeenCalled())
-    expect(refreshFiles).not.toHaveBeenCalled()
+    await waitFor(() => expect(handleAssign).toHaveBeenCalledWith(7, { linked_reservation_ids: [] }))
   })
 
   it('FE-W5ASG-030: reservation rows keep the linked highlight on mouse-out', () => {

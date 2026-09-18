@@ -1,4 +1,3 @@
-import { filesApi } from '../../api/client'
 import { fileRepo } from '../../repo/fileRepo'
 import type { StoreApi } from 'zustand'
 import type { TripStoreState } from '../tripStore'
@@ -26,7 +25,7 @@ export const createFilesSlice = (set: SetState, get: GetState): FilesSlice => ({
 
   addFile: async (tripId, formData) => {
     try {
-      const data = await filesApi.upload(tripId, formData)
+      const data = await fileRepo.create(tripId, formData)
       set(state => ({ files: [data.file, ...state.files] }))
       return data.file
     } catch (err: unknown) {
@@ -36,7 +35,7 @@ export const createFilesSlice = (set: SetState, get: GetState): FilesSlice => ({
 
   deleteFile: async (tripId, id) => {
     try {
-      await filesApi.delete(tripId, id)
+      await fileRepo.trash(id)
       set(state => ({ files: state.files.filter(f => f.id !== id) }))
     } catch (err: unknown) {
       throw new Error(getApiErrorMessage(err, 'Error deleting file'))

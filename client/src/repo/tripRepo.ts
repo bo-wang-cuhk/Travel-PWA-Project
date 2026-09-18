@@ -6,6 +6,7 @@ import type { LocalDayRecord } from '../domain/daySyncModel'
 import type { LocalAssignmentRecord } from '../domain/assignmentSyncModel'
 import { randomId } from '../utils/randomId'
 import { markLocalChange } from '../sync/localChangeRepository'
+import { resolveStoredFileUrl } from './fileRepo'
 
 export interface LocalTripOwner {
   id: number
@@ -131,10 +132,14 @@ function pickActive(trips: Trip[]): Trip | null {
   return ranked[0] ?? null
 }
 
+async function displayTrip<T extends Trip>(trip: T): Promise<T> {
+  return { ...trip, cover_image: await resolveStoredFileUrl(trip.cover_image) } as T
+}
+
 export const tripRepo = {
   async list(): Promise<{ trips: Trip[]; archivedTrips: Trip[] }> {
     if (import.meta.env.DEV && import.meta.env.MODE !== 'test') await ensureDevelopmentSeed()
-    const all = (await offlineDb.trips.toArray()).filter(t => !t.deleted_at)
+    const all = await Promise.all((await offlineDb.trips.toArray()).filter(t => !t.deleted_at).map(displayTrip))
     return {
       trips: all.filter(t => !t.is_archived),
       archivedTrips: all.filter(t => t.is_archived),
@@ -159,7 +164,7 @@ export const tripRepo = {
   async get(tripId: number | string): Promise<{ trip: Trip }> {
     const trip = await offlineDb.trips.get(Number(tripId))
     if (!trip || trip.deleted_at) throw new Error('Trip not found in local database')
-    return { trip }
+    return { trip: await displayTrip(trip) }
   },
 
   async create(data: TripCreateRequest, owner?: LocalTripOwner): Promise<{ trip: LocalTripRecord }> {
@@ -260,13 +265,43 @@ export const tripRepo = {
 
   async delete(tripId: number | string): Promise<void> {
     const id = Number(tripId)
-    await offlineDb.transaction('rw', [offlineDb.trips, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
+    await offlineDb.transaction('rw', [
+      offlineDb.trips, offlineDb.days, offlineDb.dayNotes, offlineDb.places, offlineDb.assignments,
+      offlineDb.accommodations, offlineDb.reservations, offlineDb.budgetItems,
+      offlineDb.todoItems, offlineDb.packingBags, offlineDb.packingItems, offlineDb.tripFiles,
+      offlineDb.syncOutbox, offlineDb.entitySyncMeta,
+    ], async () => {
       const trip = await offlineDb.trips.get(id)
       if (!trip || trip.deleted_at) throw new Error('Trip not found in local database')
       const now = new Date().toISOString()
       const syncId = trip.sync_id || randomId()
       await offlineDb.trips.put({ ...trip, sync_id: syncId, created_at: trip.created_at || now, deleted_at: now, updated_at: now })
       await markLocalChange('trip', syncId, 'delete')
+
+      // A Trip is the personal sync boundary. Tombstone every owned child in
+      // the same transaction so another device never receives live records
+      // whose parent has already disappeared.
+      const groups = [
+        { table: offlineDb.days, type: 'day' as const },
+        { table: offlineDb.dayNotes, type: 'dayNote' as const },
+        { table: offlineDb.places, type: 'place' as const },
+        { table: offlineDb.assignments, type: 'assignment' as const },
+        { table: offlineDb.accommodations, type: 'accommodation' as const },
+        { table: offlineDb.reservations, type: 'reservation' as const },
+        { table: offlineDb.budgetItems, type: 'budgetItem' as const },
+        { table: offlineDb.todoItems, type: 'todo' as const },
+        { table: offlineDb.packingBags, type: 'packingBag' as const },
+        { table: offlineDb.packingItems, type: 'packingItem' as const },
+        { table: offlineDb.tripFiles, type: 'tripFile' as const },
+      ]
+      for (const group of groups) {
+        const rows = await group.table.where('trip_id').equals(id).toArray() as Array<{ sync_id?: string; deleted_at?: string | null; updated_at?: string }>
+        for (const row of rows) {
+          if (!row.sync_id || row.deleted_at) continue
+          await group.table.put({ ...row, deleted_at: now, updated_at: now } as never)
+          await markLocalChange(group.type, row.sync_id, 'delete')
+        }
+      }
     })
   },
 

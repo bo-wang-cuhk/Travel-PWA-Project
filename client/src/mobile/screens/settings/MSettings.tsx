@@ -44,7 +44,7 @@ interface SectionTab {
  * gating, app version).
  */
 export default function MSettings() {
-  const { t } = useTranslation()
+  const { t, locale } = useTranslation()
   const navigate = useNavigate()
   const { hasIntegrations, appVersion, activeTab, setActiveTab } = useSettings()
   const managed = useAuthStore((s) => s.managed)
@@ -59,7 +59,7 @@ export default function MSettings() {
     ...(hasIntegrations ? [{ id: 'integrations', label: t('settings.tabs.integrations'), icon: Plug }] : []),
     ...(hasPlugins ? [{ id: 'plugins', label: t('settings.tabs.plugins'), icon: Puzzle }] : []),
     { id: 'offline', label: t('settings.tabs.offline'), icon: CloudOff },
-    { id: 'sync', label: 'GitHub Sync', icon: Cloud },
+    { id: 'sync', label: locale.startsWith('zh') ? '云同步' : 'Cloud Sync', icon: Cloud },
     { id: 'account', label: t('settings.tabs.account'), icon: User },
     // Same call as the desktop page: About is about the project — what TREK is,
     // where to file a bug, where to support it — and a customer of a hosted

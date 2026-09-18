@@ -66,6 +66,12 @@ export function useDashboard() {
 
   useEffect(() => { loadTrips() }, [])
 
+  useEffect(() => {
+    const refresh = () => { void loadTrips() }
+    window.addEventListener('travel-sync-complete', refresh)
+    return () => window.removeEventListener('travel-sync-complete', refresh)
+  }, [])
+
   // Travel stats + upcoming reservations power the atlas row and the sidebar.
   // Both are best-effort: a failure just leaves that section empty.
   useEffect(() => {

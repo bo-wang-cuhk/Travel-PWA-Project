@@ -16,6 +16,7 @@ import { forgetServerLanguage } from './settingsStore'
 import { markSignedOut, clearSignedOut } from '../utils/signedOut'
 import { SUPABASE_AUTH_ENABLED } from '../auth/supabaseClient'
 import { loadSupabaseUser, loginWithUsername, logoutSupabase } from '../auth/supabaseAuth'
+import { scheduleSync } from '../sync/syncScheduler'
 
 interface AuthResponse {
   user: User
@@ -109,7 +110,8 @@ async function onAuthSuccess(userId: number): Promise<void> {
   // Supabase Auth only replaces identity/session management in this phase.
   // The legacy trigger talks to TREK Server and must stay off in the static
   // PWA; local-first repositories keep handling their own IndexedDB writes.
-  if (!SUPABASE_AUTH_ENABLED) registerSyncTriggers()
+  if (SUPABASE_AUTH_ENABLED) scheduleSync(0)
+  else registerSyncTriggers()
 }
 
 export const useAuthStore = create<AuthState>()(

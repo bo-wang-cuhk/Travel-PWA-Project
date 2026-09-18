@@ -4,7 +4,7 @@ import MSheet from '../../../components/MSheet'
 import MListRow from '../../../components/MListRow'
 import MConfirmSheet from '../../settings/MConfirmSheet'
 import { downloadFile } from '../../../../utils/fileDownload'
-import { filesApi } from '../../../../api/client'
+import { fileRepo } from '../../../../repo/fileRepo'
 import type { TripFile } from '../../../../types'
 import type { TripPlanner } from '../MTripShell'
 import { Eyebrow, TileHeader } from '../sheets/MTripSheetUi'
@@ -59,7 +59,7 @@ export default function MFileMenuSheet({ planner, file, onClose, onOpenLinks }: 
     const value = noteDraft.trim()
     if (value === (shown.description || '')) return
     setSaving(true)
-    filesApi.update(tripId, shown.id, { description: value })
+    fileRepo.update(shown.id, { description: value })
       .then(() => tripActions.loadFiles(tripId))
       .catch(() => toast.error(t('files.toast.assignError')))
       .finally(() => setSaving(false))

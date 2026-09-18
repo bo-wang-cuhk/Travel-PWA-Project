@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Loader2, RotateCcw, Trash2 } from 'lucide-react'
 import MSheet from '../../../components/MSheet'
 import MConfirmSheet from '../../settings/MConfirmSheet'
-import { filesApi } from '../../../../api/client'
+import { fileRepo } from '../../../../repo/fileRepo'
 import type { TripFile } from '../../../../types'
 import type { TripPlanner } from '../MTripShell'
 import { TileHeader } from '../sheets/MTripSheetUi'
@@ -18,7 +18,7 @@ interface MFileTrashSheetProps {
 
 /**
  * Trash sheet (spec 03 §5.3 trashGo, §7.3): fetches the trashed files
- * (filesApi.list(tripId, true)) on open, same lazy-load-on-toggle pattern as
+ * (fileRepo.list(tripId, true)) on open, same lazy-load-on-toggle pattern as
  * useFileManager.ts's toggleTrash/loadTrash. Restore/permanent-delete/empty
  * all bypass the store like the rest of §7.3.
  */
@@ -36,7 +36,7 @@ export default function MFileTrashSheet({ planner, open, onClose }: MFileTrashSh
     if (!open) return
     let cancelled = false
     setLoading(true)
-    filesApi.list(tripId, true)
+    fileRepo.list(tripId, true)
       .then((data: { files?: TripFile[] }) => { if (!cancelled) setFiles(data.files || []) })
       .catch(() => {})
       .finally(() => { if (!cancelled) setLoading(false) })
@@ -47,7 +47,7 @@ export default function MFileTrashSheet({ planner, open, onClose }: MFileTrashSh
 
   const restore = (id: number) => {
     setBusyId(id)
-    filesApi.restore(tripId, id)
+    fileRepo.restore(id)
       .then(() => {
         setFiles(prev => prev.filter(f => f.id !== id))
         tripActions.loadFiles(tripId)
@@ -60,7 +60,7 @@ export default function MFileTrashSheet({ planner, open, onClose }: MFileTrashSh
   const permanentDelete = (id: number) => {
     setConfirmDeleteId(null)
     setBusyId(id)
-    filesApi.permanentDelete(tripId, id)
+    fileRepo.permanentDelete(id)
       .then(() => {
         setFiles(prev => prev.filter(f => f.id !== id))
         toast.success(t('files.toast.deleted'))
@@ -73,7 +73,7 @@ export default function MFileTrashSheet({ planner, open, onClose }: MFileTrashSh
   const emptyTrash = () => {
     setConfirmEmpty(false)
     setEmptying(true)
-    filesApi.emptyTrash(tripId)
+    fileRepo.emptyTrash(tripId)
       .then(() => { setFiles([]); toast.success(t('files.toast.trashEmptied')) })
       .catch(() => toast.error(t('files.toast.deleteError')))
       .finally(() => setEmptying(false))

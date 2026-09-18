@@ -51,6 +51,11 @@ function isIosStandalone(): boolean {
  * still reports true ("sometimes it works, sometimes it doesn't").
  */
 async function getFileBlob(url: string): Promise<Blob> {
+  if (url.startsWith('blob:')) {
+    const response = await fetch(url)
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    return response.blob()
+  }
   assertRelativeUrl(url)
   if (typeof navigator !== 'undefined' && isEffectivelyOffline()) {
     const cached = await getCachedBlob(url)
