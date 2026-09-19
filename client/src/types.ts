@@ -126,6 +126,8 @@ export interface Settings {
   map_always_show_routes?: boolean
   optimize_from_accommodation?: boolean
   map_provider?: 'leaflet' | 'mapbox-gl' | 'maplibre-gl'
+  /** External app used by the provider-neutral MapLauncher. */
+  default_map_app?: 'google' | 'amap' | 'baidu' | 'apple' | 'ask'
   /** Leaflet base layer: default street tiles or a satellite/aerial view. */
   map_base_layer?: 'default' | 'satellite'
   /** CARTO basemaps watermark keyless tiles; the key is appended as ?key= (#2054). */

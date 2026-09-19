@@ -21,6 +21,7 @@ import { withTileApiKey } from '../../../utils/tileUrl'
 import MToggle from '../../components/MToggle'
 import { MSetCard, MSetEyebrow, MSetSelectRow, MSetInput, MSetButton, MSetHint, MSetRow } from './MSettingsUi'
 import MSetPickerSheet from './MSetPickerSheet'
+import { MAP_PROVIDER_OPTIONS, type MapProviderPreference } from '../../../mapLauncher'
 
 interface MapPreset {
   name: string
@@ -69,7 +70,7 @@ const PREVIEW_ZOOM = 16
  */
 export default function MSettingsMap() {
   const { settings, updateSettings } = useSettingsStore()
-  const { t } = useTranslation()
+  const { t, locale } = useTranslation()
   const toast = useToast()
   const initialProvider = normalizeProvider(settings.map_provider)
   const [saving, setSaving] = useState(false)
@@ -83,6 +84,8 @@ export default function MSettingsMap() {
   const [mapboxQuality, setMapboxQuality] = useState<boolean>(settings.mapbox_quality_mode === true)
   const [presetOpen, setPresetOpen] = useState(false)
   const [styleOpen, setStyleOpen] = useState(false)
+  const [mapAppOpen, setMapAppOpen] = useState(false)
+  const [defaultMapApp, setDefaultMapApp] = useState<MapProviderPreference>(settings.default_map_app || 'ask')
 
   useEffect(() => {
     const nextProvider = normalizeProvider(settings.map_provider)
@@ -93,6 +96,7 @@ export default function MSettingsMap() {
     setMapboxStyle(styleForProvider(nextProvider, slotStyle(nextProvider, settings)))
     setMapbox3d(settings.mapbox_3d_enabled !== false)
     setMapboxQuality(settings.mapbox_quality_mode === true)
+    setDefaultMapApp(settings.default_map_app || 'ask')
   }, [settings])
 
   const previewPlaces = useMemo(
@@ -133,6 +137,7 @@ export default function MSettingsMap() {
         ...stylePatch,
         mapbox_3d_enabled: mapbox3d,
         mapbox_quality_mode: mapboxQuality,
+        default_map_app: defaultMapApp,
       })
       toast.success(t('settings.toast.mapSaved'))
     } catch (err: unknown) {
@@ -291,6 +296,21 @@ export default function MSettingsMap() {
         </>
       )}
 
+      <MSetEyebrow className="mb-[5px] mt-[14px]">
+        {locale.startsWith('zh') ? '默认地图应用' : 'Default map app'}
+      </MSetEyebrow>
+      <MSetSelectRow
+        label={(() => {
+          const selected = MAP_PROVIDER_OPTIONS.find(option => option.value === defaultMapApp)
+          return locale.startsWith('zh') ? selected?.labelZh : selected?.label
+        })()}
+        trailing={chevron}
+        onClick={() => setMapAppOpen(true)}
+      />
+      <MSetHint>
+        {locale.startsWith('zh') ? '地点坐标始终保存为 WGS84，仅在打开外部地图时转换。' : 'Places stay in WGS84; conversion happens only when opening an external map.'}
+      </MSetHint>
+
       <div className="relative mt-3 h-[200px] w-full overflow-hidden rounded-xl">
         {provider !== 'leaflet' ? (
           /* See MapSettingsTab: the preview gets its own net. */
@@ -335,6 +355,18 @@ export default function MSettingsMap() {
         <Save size={14} />
         {t('settings.saveMap')}
       </MSetButton>
+
+      <MSetPickerSheet
+        open={mapAppOpen}
+        onClose={() => setMapAppOpen(false)}
+        title={locale.startsWith('zh') ? '默认地图应用' : 'Default map app'}
+        value={defaultMapApp}
+        onSelect={value => setDefaultMapApp(value as MapProviderPreference)}
+        options={MAP_PROVIDER_OPTIONS.map(option => ({
+          value: option.value,
+          label: locale.startsWith('zh') ? option.labelZh : option.label,
+        }))}
+      />
 
       <MSetPickerSheet
         open={presetOpen}

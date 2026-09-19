@@ -21,6 +21,7 @@ import type { BookingExpenseRequest } from './BookingCostsSection.types'
 import type { Place, Category, Assignment, BudgetItem } from '../../types'
 import { NumericInput } from '../shared/NumericInput'
 import { PlacesSession } from '../../utils/placesSession'
+import { STANDALONE_MODE } from '../../config/runtimeMode'
 
 // The submit payload mirrors the form, but lat/lng are parsed to numbers and
 // category_id is normalised, plus any files chosen before the place existed.
@@ -294,7 +295,7 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
       // Detect Google Maps URLs and resolve them directly
       const trimmed = mapsSearch.trim()
       if (isGoogleMapsUrl(trimmed)) {
-        const resolved = await mapsApi.resolveUrl(trimmed)
+        const resolved = await mapsApi.resolveUrl(trimmed, language)
         if (resolved.lat && resolved.lng) {
           setForm(prev => ({
             ...prev,
@@ -310,7 +311,7 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
           return
         }
       }
-      const result = await mapsApi.search(mapsSearch, language)
+      const result = await mapsApi.search(mapsSearch, language, locationBias)
       setMapsResults(result.places || [])
     } catch (err: unknown) {
       toast.error(getApiErrorMessage(err, t('places.mapsSearchError')))
@@ -368,7 +369,7 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
       }
       if (!place) {
         const query = [suggestion.mainText, suggestion.secondaryText].filter(Boolean).join(', ')
-        const search = await mapsApi.search(query, language)
+        const search = await mapsApi.search(query, language, locationBias)
         place = search.places?.[0] ?? null
       }
       if (place) {
@@ -658,7 +659,10 @@ export default function PlaceFormModal(props: PlaceFormModalProps) {
   // The detail column sits on the left on desktop whenever enrichment is on. It
   // stays mounted with the selection null rather than appearing on the first
   // pick — otherwise the dialog would jump sideways mid-typing.
-  const showDetails = !isMobile && placesEnrichEnabled
+  // The legacy enrichment fan-out belongs to TREK Server. The standalone PWA's
+  // Edge Function intentionally only searches; a failed details column must not
+  // make a successful Nominatim result look broken.
+  const showDetails = !STANDALONE_MODE && !isMobile && placesEnrichEnabled
   const modalSize = isMobile ? 'lg' : showDetails && twoColumn ? '5xl' : showDetails || twoColumn ? '4xl' : 'lg'
   const descriptionRef = useRef<HTMLTextAreaElement | null>(null)
   const notesRef = useRef<HTMLTextAreaElement | null>(null)

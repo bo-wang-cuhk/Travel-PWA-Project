@@ -15,6 +15,8 @@ export interface PlaceFormData {
   google_place_id?: string
   google_ftid?: string
   osm_id?: string
+  source?: string
+  external_place_id?: string
   // Hero image picked from the detail column. Optional and absent from
   // DEFAULT_FORM on purpose: the mobile sheet shares this type and never sets
   // it, and places.service already writes image_url through on create/update.
@@ -71,6 +73,8 @@ export const RESULT_FIELDS = [
   'google_place_id',
   'google_ftid',
   'osm_id',
+  'source',
+  'external_place_id',
   'website',
   'phone',
 ] as const

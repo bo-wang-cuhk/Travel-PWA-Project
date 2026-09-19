@@ -16,6 +16,8 @@ export interface PlSearchPick {
   google_place_id?: string
   google_ftid?: string
   osm_id?: string
+  source?: string
+  external_place_id?: string
   website?: string
   phone?: string
 }
@@ -50,6 +52,8 @@ function placeToPick(place: MapsPlace): PlSearchPick {
     google_place_id: s(place.google_place_id),
     google_ftid: s(place.google_ftid),
     osm_id: s(place.osm_id),
+    source: s(place.source),
+    external_place_id: s(place.external_place_id),
     website: s(place.website),
     phone: s(place.phone),
   }
@@ -133,7 +137,7 @@ export default function PlPlaceSearch({ planner, locationBias, onPick, onResolvi
     setResolving(true)
     try {
       if (isGoogleMapsUrl(trimmed)) {
-        const resolved = await mapsApi.resolveUrl(trimmed)
+        const resolved = await mapsApi.resolveUrl(trimmed, language)
         if (resolved.lat && resolved.lng) {
           onPick({
             name: resolved.name || undefined,
@@ -147,7 +151,7 @@ export default function PlPlaceSearch({ planner, locationBias, onPick, onResolvi
           return
         }
       }
-      const result = await mapsApi.search(trimmed, language)
+      const result = await mapsApi.search(trimmed, language, locationBias)
       setResults(result.places || [])
     } catch (err: unknown) {
       toast.error(getApiErrorMessage(err, t('places.mapsSearchError')))
@@ -176,7 +180,7 @@ export default function PlPlaceSearch({ planner, locationBias, onPick, onResolvi
       }
       if (!place) {
         const fullQuery = [suggestion.mainText, suggestion.secondaryText].filter(Boolean).join(', ')
-        const search = await mapsApi.search(fullQuery, language)
+        const search = await mapsApi.search(fullQuery, language, locationBias)
         place = (search.places?.[0] as MapsPlace | undefined) ?? null
       }
       if (place) {

@@ -26,6 +26,26 @@ export const hasStoredLanguage = (): boolean =>
   typeof localStorage !== 'undefined' && !!localStorage.getItem('app_language')
 
 const SERVER_LANGUAGE_KEY = 'app_language_server'
+const STANDALONE_SETTINGS_KEY = 'trek_standalone_settings_v1'
+
+function readStandaloneSettings(): Partial<Settings> {
+  if (!STANDALONE_MODE || typeof localStorage === 'undefined') return {}
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STANDALONE_SETTINGS_KEY) || '{}')
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Partial<Settings> : {}
+  } catch {
+    return {}
+  }
+}
+
+function persistStandaloneSettings(settings: Settings): void {
+  if (!STANDALONE_MODE || typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(STANDALONE_SETTINGS_KEY, JSON.stringify(settings))
+  } catch {
+    // A full/private storage area should not make changing a UI preference fail.
+  }
+}
 
 // An account that never picked a language sends no language key at all
 // (getUserSettings returns only what was set), so a mirror left over from
@@ -73,13 +93,14 @@ export const DEFAULT_SETTINGS: Settings = {
   time_format: '24h',
   show_place_description: false,
   optimize_from_accommodation: true,
-  map_provider: 'leaflet',
+  map_provider: 'maplibre-gl',
+  default_map_app: 'ask',
   map_base_layer: 'default',
   map_poi_pill_enabled: true,
   carto_api_key: '',
   mapbox_access_token: '',
   mapbox_style: 'mapbox://styles/mapbox/standard',
-  maplibre_style: '',
+  maplibre_style: 'https://tiles.openfreemap.org/styles/liberty',
   mapbox_3d_enabled: true,
   mapbox_quality_mode: false,
   dashboard_fx_from: 'EUR',
@@ -89,6 +110,7 @@ export const DEFAULT_SETTINGS: Settings = {
   appearance: DEFAULT_APPEARANCE,
   // dashboard_timezones is intentionally left unset so the widget can tell "never
   // chosen" (fall back to home + defaults) from an explicitly emptied list.
+  ...readStandaloneSettings(),
 }
 
 // De-dupe concurrent loads: the reconnection triggers (online / visibility /
@@ -165,7 +187,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }))
     if (key === 'language') localStorage.setItem('app_language', next as string)
     rememberStartDestination({ [key]: next } as Partial<Settings>)
-    if (STANDALONE_MODE) return
+    if (STANDALONE_MODE) {
+      persistStandaloneSettings(get().settings)
+      return
+    }
     try {
       await settingsApi.set(key, next)
     } catch (err: unknown) {
@@ -198,7 +223,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       settings: { ...state.settings, ...patch },
     }))
     rememberStartDestination(patch)
-    if (STANDALONE_MODE) return
+    if (STANDALONE_MODE) {
+      persistStandaloneSettings(get().settings)
+      return
+    }
     try {
       await settingsApi.setBulk(patch)
     } catch (err: unknown) {

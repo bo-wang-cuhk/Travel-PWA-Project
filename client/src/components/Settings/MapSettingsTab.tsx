@@ -22,6 +22,7 @@ import {
   type GlMapProvider,
 } from '../Map/glProviders'
 import { useAuthStore } from '../../store/authStore'
+import { MAP_PROVIDER_OPTIONS, type MapProviderPreference } from '../../mapLauncher'
 
 interface MapPreset {
   name: string
@@ -163,7 +164,7 @@ const PREVIEW_ZOOM = 16
 
 export default function MapSettingsTab(): React.ReactElement {
   const { settings, updateSettings } = useSettingsStore()
-  const { t } = useTranslation()
+  const { t, locale } = useTranslation()
   const toast = useToast()
   const initialProvider = normalizeProvider(settings.map_provider)
   const [saving, setSaving] = useState(false)
@@ -175,6 +176,7 @@ export default function MapSettingsTab(): React.ReactElement {
   const [mapboxStyle, setMapboxStyle] = useState<string>(styleForProvider(initialProvider, slotStyle(initialProvider, settings)))
   const [mapbox3d, setMapbox3d] = useState<boolean>(settings.mapbox_3d_enabled !== false)
   const [mapboxQuality, setMapboxQuality] = useState<boolean>(settings.mapbox_quality_mode === true)
+  const [defaultMapApp, setDefaultMapApp] = useState<MapProviderPreference>(settings.default_map_app || 'ask')
   // One chunk per engine — see components/Map/glLazy.tsx.
   const GlMapPreview = provider === 'maplibre-gl' ? GlMapPreviewMaplibre : GlMapPreviewMapbox
 
@@ -187,6 +189,7 @@ export default function MapSettingsTab(): React.ReactElement {
     setMapboxStyle(styleForProvider(nextProvider, slotStyle(nextProvider, settings)))
     setMapbox3d(settings.mapbox_3d_enabled !== false)
     setMapboxQuality(settings.mapbox_quality_mode === true)
+    setDefaultMapApp(settings.default_map_app || 'ask')
   }, [settings])
 
   const previewPlaces = useMemo((): Place[] => [{
@@ -222,6 +225,7 @@ export default function MapSettingsTab(): React.ReactElement {
         ...stylePatch,
         mapbox_3d_enabled: mapbox3d,
         mapbox_quality_mode: mapboxQuality,
+        default_map_app: defaultMapApp,
       })
       // Only mirror the normalized style into the form once it is actually persisted.
       setMapboxStyle(glStyle)
@@ -440,6 +444,24 @@ export default function MapSettingsTab(): React.ReactElement {
           )}
         </div>
       )}
+
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1.5">
+          {locale.startsWith('zh') ? '默认地图应用' : 'Default map app'}
+        </label>
+        <CustomSelect
+          value={defaultMapApp}
+          onChange={(value: string) => setDefaultMapApp(value as MapProviderPreference)}
+          options={MAP_PROVIDER_OPTIONS.map(option => ({
+            value: option.value,
+            label: locale.startsWith('zh') ? option.labelZh : option.label,
+          }))}
+          size="sm"
+        />
+        <p className="text-xs text-slate-400 mt-1">
+          {locale.startsWith('zh') ? '地点坐标始终保存为 WGS84，仅在打开外部地图时转换。' : 'Places stay in WGS84; conversion happens only when opening an external map.'}
+        </p>
+      </div>
 
       <div>
         <div style={{ position: 'relative', inset: 0, height: '200px', width: '100%' }}>

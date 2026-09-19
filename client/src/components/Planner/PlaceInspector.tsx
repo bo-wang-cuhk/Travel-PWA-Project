@@ -526,11 +526,7 @@ export default function PlaceInspector({
                 }}
                 variant="ghost"
                 icon={<Navigation size={13} />}
-                label={
-                  <span className="hidden sm:inline">
-                    {navigationTargets.length === 1 ? navigationTargets[0].label : t('inspector.navigation')}
-                  </span>
-                }
+                label={<span className="hidden sm:inline">{t('inspector.navigation')}</span>}
               />
               {navOpen && (
                 <NavigationMenu

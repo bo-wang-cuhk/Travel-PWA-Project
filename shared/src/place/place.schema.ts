@@ -100,6 +100,9 @@ export const placeSchema = z.object({
   google_place_id: z.string().nullable().optional(),
   google_ftid: z.string().nullable().optional(),
   osm_id: z.string().nullable().optional(),
+  /** Provider-neutral provenance for local-first place search. */
+  source: z.string().nullable().optional(),
+  external_place_id: z.string().nullable().optional(),
   route_geometry: z.string().nullable().optional(),
   // Manual track colour (#776). null = inherit the category colour like before.
   route_color: hexColorSchema.nullable().optional(),
@@ -145,6 +148,8 @@ export const assignmentPlaceSchema = z.object({
   // Carried on the embedded place so the day-plan thumbnail can auto-fetch an
   // OSM photo the same way the sidebar/inspector do (#1136 follow-up).
   osm_id: z.string().nullable().optional(),
+  source: z.string().nullable().optional(),
+  external_place_id: z.string().nullable().optional(),
   website: z.string().nullable().optional(),
   phone: z.string().nullable().optional(),
   category: placeCategorySchema.optional(),

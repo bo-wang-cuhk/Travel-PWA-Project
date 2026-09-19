@@ -240,7 +240,7 @@ export default function CollectionPlaceDetail({
                   }}
                 >
                   <Navigation size={12} />
-                  {navigationTargets.length === 1 ? navigationTargets[0].label : t('inspector.navigation')}
+                  {t('inspector.navigation')}
                 </button>
                 {navOpen && (
                   <NavigationMenu

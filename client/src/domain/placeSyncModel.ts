@@ -36,6 +36,8 @@ export interface SyncedPlace {
   googlePlaceId: string | null
   googleFtid: string | null
   osmId: string | null
+  source?: string | null
+  externalPlaceId?: string | null
   routeGeometry: string | null
   routeColor: string | null
   website: string | null
@@ -69,6 +71,8 @@ export function toSyncedPlace(place: LocalPlaceRecord): SyncedPlace {
     googlePlaceId: place.google_place_id ?? null,
     googleFtid: place.google_ftid ?? null,
     osmId: place.osm_id ?? null,
+    source: place.source ?? null,
+    externalPlaceId: place.external_place_id ?? null,
     routeGeometry: place.route_geometry ?? null,
     routeColor: place.route_color ?? null,
     website: place.website ?? null,
@@ -105,6 +109,8 @@ export function applySyncedPlace(remote: SyncedPlace, localId: number, tripId: n
     google_place_id: remote.googlePlaceId,
     google_ftid: remote.googleFtid,
     osm_id: remote.osmId,
+    source: remote.source ?? null,
+    external_place_id: remote.externalPlaceId ?? null,
     route_geometry: remote.routeGeometry,
     route_color: remote.routeColor,
     website: remote.website,
