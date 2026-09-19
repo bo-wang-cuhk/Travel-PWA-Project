@@ -8,6 +8,9 @@ export interface LocalChange {
   operation: SyncOperation
   baseVersion?: string | null
   payload?: unknown
+  /** A durable edit made offline (or retried after a network failure). */
+  offline?: boolean
+  changedAt?: number
 }
 
 export interface RemoteChange {
@@ -55,6 +58,7 @@ export interface SyncOutboxRecord {
   status: 'pending' | 'syncing' | 'error' | 'conflict'
   attempts: number
   lastError: string | null
+  offline?: boolean
 }
 
 export interface EntitySyncMetaRecord {

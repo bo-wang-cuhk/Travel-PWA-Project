@@ -142,6 +142,14 @@ function userDbName(userId: number | string): string {
   return `trek-offline-u${userId}`;
 }
 
+function activeWorkspaceDbName(userId: number | string): string {
+  try {
+    return localStorage.getItem(`trek-active-workspace-db-${userId}`) || userDbName(userId);
+  } catch {
+    return userDbName(userId);
+  }
+}
+
 /**
  * Best-effort read of the persisted auth snapshot so the very first DB opened on
  * app load (before loadUser resolves) is already the correct per-user one — the
@@ -152,7 +160,7 @@ function initialDbName(): string {
     const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('trek_auth_snapshot') : null;
     if (!raw) return ANON_DB_NAME;
     const id = JSON.parse(raw)?.state?.user?.id;
-    return id != null ? userDbName(id) : ANON_DB_NAME;
+    return id != null ? activeWorkspaceDbName(id) : ANON_DB_NAME;
   } catch {
     return ANON_DB_NAME;
   }
@@ -731,12 +739,24 @@ async function switchTo(name: string): Promise<void> {
 
 /** Point the offline DB at a specific user's scoped database (call on login). */
 export async function reopenForUser(userId: number | string): Promise<void> {
-  await switchTo(userDbName(userId));
+  await switchTo(activeWorkspaceDbName(userId));
 }
 
 /** Point the offline DB at the anonymous database (call on logout). */
 export async function reopenAnonymous(): Promise<void> {
   await switchTo(ANON_DB_NAME);
+}
+
+/**
+ * Each cloud workspace gets a separate local working database. The owner's
+ * existing Personal Workspace keeps its original per-user DB when promoted;
+ * joining somebody else's space opens a new DB without deleting personal data
+ * or pending edits. The last active DB is restored on an offline cold start.
+ */
+export async function prepareLocalWorkspace(workspaceId: string, userId: number, ownsWorkspace: boolean): Promise<void> {
+  const name = ownsWorkspace ? userDbName(userId) : `${userDbName(userId)}-w${workspaceId}`;
+  await switchTo(name);
+  try { localStorage.setItem(`trek-active-workspace-db-${userId}`, name); } catch { /* private-mode storage */ }
 }
 
 /**

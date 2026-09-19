@@ -31,6 +31,7 @@ import { useTileUrl } from '../../hooks/useTileUrl'
 import { resolvePoolAssignmentId } from './tripPlannerModel'
 import { isDeepLinkableTripTab, TRIP_TAB_LABEL_KEYS } from '../../constants/tripTabs'
 import { isRoutableReservation } from '../../utils/reservationRoutes'
+import { workspaceMembersApi } from '../../auth/workspaceMembersApi'
 import {
   parseStoredConnections, resolveEffectiveConnections, resolveVisibleConnectionIds,
   toggleConnectionId, toggleAllConnections as flipAllConnectionsMode,
@@ -99,10 +100,10 @@ export function useTripPlanner() {
   // just-added guest or member without a full page reload.
   const refreshMembers = useCallback(() => {
     if (!tripId || isEffectivelyOffline()) return
-    tripsApi.getMembers(tripId).then(d => {
-      const all = [d.owner, ...(d.members || [])].filter(Boolean)
-      setTripMembers(all)
-    }).catch(() => {})
+    const request = STANDALONE_MODE
+      ? workspaceMembersApi.context().then(context => ({ members: context.members }))
+      : tripsApi.getMembers(tripId).then(d => ({ members: [d.owner, ...(d.members || [])].filter(Boolean) }))
+    request.then(d => setTripMembers(d.members as TripMember[])).catch(() => {})
   }, [tripId])
 
   const loadAccommodations = useCallback(() => {
@@ -433,6 +434,14 @@ export function useTripPlanner() {
     window.addEventListener('accommodations:refresh', onRefresh)
     return () => window.removeEventListener('accommodations:refresh', onRefresh)
   }, [loadAccommodations])
+  useEffect(() => {
+    const onSyncComplete = () => {
+      loadAccommodations()
+      refreshMembers()
+    }
+    window.addEventListener('travel-sync-complete', onSyncComplete)
+    return () => window.removeEventListener('travel-sync-complete', onSyncComplete)
+  }, [loadAccommodations, refreshMembers])
 
   useTripWebSocket(tripId)
 

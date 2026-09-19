@@ -38,6 +38,13 @@ export function useVacay() {
     addListener(handleWsMessage)
     return () => removeListener(handleWsMessage)
   }, [handleWsMessage])
+  // Supabase Realtime wakes the durable sync pipeline. Refresh the visible
+  // Vacay store only after its IndexedDB pull has completed.
+  useEffect(() => {
+    const onSyncComplete = () => { void loadAll() }
+    window.addEventListener('travel-sync-complete', onSyncComplete)
+    return () => window.removeEventListener('travel-sync-complete', onSyncComplete)
+  }, [loadAll])
   useEffect(() => {
     if (selectedYear) { loadEntries(selectedYear); loadStats(selectedYear); loadHolidays(selectedYear); loadSharedCalendars(selectedYear) }
   }, [selectedYear])

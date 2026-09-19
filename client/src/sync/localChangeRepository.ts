@@ -22,6 +22,7 @@ export async function markLocalChange(
     status: 'pending',
     attempts: 0,
     lastError: null,
+    offline: typeof navigator !== 'undefined' && !navigator.onLine,
   })
   await offlineDb.entitySyncMeta.put({
     key,

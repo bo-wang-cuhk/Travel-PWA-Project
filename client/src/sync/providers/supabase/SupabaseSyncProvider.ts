@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '../../../auth/supabaseClient'
+import { prepareLocalWorkspace } from '../../../db/offlineDb'
 import type { LocalChange, ProviderStatus, PushResult, RemoteChange, RemoteChanges, SyncEntityType, SyncProvider } from '../../types'
 
 const TABLE_BY_ENTITY: Record<SyncEntityType, string> = {
@@ -38,7 +39,15 @@ function deletedAt(payload: unknown): string | null {
   return typeof value === 'string' && value ? value : null
 }
 
-/** Supabase-backed personal sync. Session credentials stay owned by Supabase Auth. */
+function localUpdatedAt(change: LocalChange): string {
+  const payload = change.payload as { updatedAt?: unknown } | null
+  const raw = typeof payload?.updatedAt === 'string' ? payload.updatedAt : null
+  const stamp = raw && Number.isFinite(Date.parse(raw)) ? Date.parse(raw) : change.changedAt
+  if (!stamp || !Number.isFinite(stamp)) throw new Error(`Invalid edit timestamp for ${change.entityType} ${change.entityId}`)
+  return new Date(stamp).toISOString()
+}
+
+/** Supabase-backed local-first sync for the user's active personal/shared workspace. */
 export class SupabaseSyncProvider implements SyncProvider {
   readonly id = 'supabase'
   readonly syncMode = 'last-write-wins' as const
@@ -48,9 +57,22 @@ export class SupabaseSyncProvider implements SyncProvider {
     const client = getSupabaseClient()
     const { data: sessionData, error: sessionError } = await client.auth.getSession()
     if (sessionError || !sessionData.session) throw new Error('Supabase session is unavailable')
-    const { data, error } = await client.rpc('current_personal_workspace')
+    const { data, error } = await client.rpc('current_sync_workspace')
     if (error) throw new Error(error.message)
-    if (typeof data !== 'string' || !data) throw new Error('Personal workspace is unavailable')
+    if (typeof data !== 'string' || !data) throw new Error('Sync workspace is unavailable')
+    const { data: workspace, error: workspaceError } = await client
+      .from('workspaces')
+      .select('owner_id')
+      .eq('id', data)
+      .single<{ owner_id: string }>()
+    if (workspaceError || !workspace) throw new Error(workspaceError?.message || 'Sync workspace is unavailable')
+    const { data: profile, error: profileError } = await client
+      .from('profiles')
+      .select('legacy_user_id')
+      .eq('id', sessionData.session.user.id)
+      .single<{ legacy_user_id: number }>()
+    if (profileError || !profile) throw new Error(profileError?.message || 'Profile is unavailable')
+    await prepareLocalWorkspace(data, profile.legacy_user_id, workspace.owner_id === sessionData.session.user.id)
     this.workspaceId = data
     return { connected: true }
   }
@@ -127,6 +149,21 @@ export class SupabaseSyncProvider implements SyncProvider {
 
     for (const change of changes) {
       if (!change.payload) throw new Error(`Missing local payload for ${change.entityType} ${change.entityId}`)
+      if (change.offline) {
+        const { data, error } = await client.rpc('push_offline_workspace_change', {
+          p_entity_type: change.entityType,
+          p_id: change.entityId,
+          p_workspace_id: this.workspaceId,
+          p_payload: change.payload,
+          p_deleted_at: change.operation === 'delete' ? deletedAt(change.payload) || new Date().toISOString() : null,
+          p_local_updated_at: localUpdatedAt(change),
+        })
+        if (error) throw new Error(error.message)
+        const result = (data as Array<{ applied: boolean; revision: number }> | null)?.[0]
+        if (!result) throw new Error(`Missing cloud version for ${change.entityType} ${change.entityId}`)
+        versions[change.entityId] = String(result.revision)
+        continue
+      }
       const { data, error } = await client
         .from(TABLE_BY_ENTITY[change.entityType])
         .upsert({
@@ -134,7 +171,7 @@ export class SupabaseSyncProvider implements SyncProvider {
           workspace_id: this.workspaceId,
           payload: change.payload,
           deleted_at: change.operation === 'delete' ? deletedAt(change.payload) || new Date().toISOString() : null,
-        }, { onConflict: 'id' })
+        }, { onConflict: 'workspace_id,id' })
         .select('revision')
         .single()
       if (error) throw new Error(error.message)

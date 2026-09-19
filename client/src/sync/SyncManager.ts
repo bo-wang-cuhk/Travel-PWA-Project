@@ -12,7 +12,7 @@ import { applySyncedVacay, toSyncedVacay, VACAY_SYNC_ID, type SyncedVacay } from
 import { applySyncedTrip, toSyncedTrip, type SyncedTrip } from '../domain/tripSyncModel'
 import { applySyncedTripFile, toSyncedTripFile, type LocalTripFileRecord, type SyncedTripFile } from '../domain/tripFileSyncModel'
 import { syncEntityKey } from './localChangeRepository'
-import type { LocalChange, RemoteChange, SyncProvider } from './types'
+import type { LocalChange, RemoteChange, SyncProvider, SyncStateRecord } from './types'
 
 async function nextLocalTripId(): Promise<number> {
   const first = await offlineDb.trips.orderBy('id').first()
@@ -595,7 +595,11 @@ export class SyncManager {
       }
     }
     const order = { trip: 0, day: 1, dayNote: 2, place: 2, assignment: 3, accommodation: 4, reservation: 5, budgetItem: 6, todo: 6, packingBag: 6, packingItem: 7, tripFile: 8, packingConfig: 9, vacay: 9 } as const
-    return changes.sort((a, b) => order[a.entityType] - order[b.entityType])
+    const queued = new Map(outbox.map(row => [row.key, row]))
+    return changes.map(change => {
+      const row = queued.get(syncEntityKey(change.entityType, change.entityId))
+      return { ...change, offline: Boolean(row?.offline || row?.attempts), changedAt: row?.changedAt }
+    }).sort((a, b) => order[a.entityType] - order[b.entityType])
   }
 
   /** Supabase LWW flow: durable local writes first, then cloud incrementals. */
@@ -643,17 +647,19 @@ export class SyncManager {
   }
 
   async sync(): Promise<SyncRunResult> {
-    const previous = await offlineDb.syncState.get(this.provider.id)
-    await offlineDb.syncState.put({
-      providerId: this.provider.id,
-      cursor: previous?.cursor ?? null,
-      lastSyncAt: previous?.lastSyncAt ?? null,
-      lastError: null,
-      status: 'syncing',
-    })
-
+    // A provider may switch to another workspace-scoped IndexedDB connection.
+    // Read the cursor only after connect, never from the prior workspace.
+    let previous: SyncStateRecord | undefined
     try {
       await this.provider.connect()
+      previous = await offlineDb.syncState.get(this.provider.id)
+      await offlineDb.syncState.put({
+        providerId: this.provider.id,
+        cursor: previous?.cursor ?? null,
+        lastSyncAt: previous?.lastSyncAt ?? null,
+        lastError: null,
+        status: 'syncing',
+      })
       if (this.provider.syncMode === 'last-write-wins') return await this.syncLastWriteWins(previous?.cursor ?? null)
       // Pull before push. Store the observed head before pushing so a retry after
       // a non-fast-forward starts from the exact remote version we merged.

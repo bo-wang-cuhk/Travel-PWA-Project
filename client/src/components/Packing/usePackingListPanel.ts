@@ -13,6 +13,8 @@ import { useBagTotalsPing } from './useBagTotalsPing'
 import type { PackingItem, PackingBag } from '../../types'
 import { BAG_COLORS, PACKING_PLACEHOLDER_NAME } from './packingListPanel.constants'
 import { parseImportLines } from './packingListPanel.helpers'
+import { workspaceMembersApi } from '../../auth/workspaceMembersApi'
+import { STANDALONE_MODE } from '../../config/runtimeMode'
 
 export interface TripMember {
   id: number
@@ -72,7 +74,13 @@ export function usePackingList({ tripId, items, openImportSignal = 0, clearCheck
   const [categoryAssignees, setCategoryAssignees] = useState<Record<string, CategoryAssignee[]>>({})
 
   useEffect(() => {
-    tripsApi.getMembers(tripId).then(data => {
+    const request = STANDALONE_MODE
+      ? workspaceMembersApi.context().then(context => ({
+          owner: context.members.find(member => member.role === 'owner'),
+          members: context.members.filter(member => member.role !== 'owner'),
+        }))
+      : tripsApi.getMembers(tripId)
+    request.then(data => {
       const all: TripMember[] = []
       if (data.owner) all.push({ id: data.owner.id, username: data.owner.username, avatar: data.owner.avatar_url, is_guest: false })
       if (data.members) all.push(...data.members.map((m: any) => ({ id: m.id, username: m.username, avatar: m.avatar_url, is_guest: !!m.is_guest })))

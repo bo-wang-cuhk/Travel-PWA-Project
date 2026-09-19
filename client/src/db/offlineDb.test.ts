@@ -9,6 +9,7 @@ import {
   reopenForUser,
   reopenAnonymous,
   deleteCurrentUserDb,
+  prepareLocalWorkspace,
   upsertTrip,
   upsertDays,
   upsertPlaces,
@@ -330,6 +331,36 @@ describe('offlineDb — per-user database scoping', () => {
 
     expect(offlineDb.name).toBe('trek-offline')
     expect(await offlineDb.trips.get(502)).toBeDefined()
+  })
+})
+
+describe('offlineDb — cloud workspace scoping', () => {
+  it('keeps an owner\'s unscoped working set when the existing workspace is promoted', async () => {
+    await reopenForUser(871)
+    await upsertTrip(buildTrip({ id: 71 }))
+
+    await prepareLocalWorkspace('workspace-owner', 871, true)
+
+    expect(await offlineDb.trips.get(71)).toBeDefined()
+    expect(offlineDb.name).toBe('trek-offline-u871')
+  })
+
+  it('preserves a new member\'s personal edits in a separate DB when opening a shared workspace', async () => {
+    await reopenForUser(872)
+    await upsertTrip(buildTrip({ id: 72 }))
+    await offlineDb.syncOutbox.put({
+      key: 'trip:old-personal', entityType: 'trip', entityId: 'old-personal', operation: 'upsert',
+      changedAt: Date.now(), status: 'pending', attempts: 0, lastError: null,
+    })
+
+    await prepareLocalWorkspace('workspace-shared', 872, false)
+
+    expect(await offlineDb.trips.count()).toBe(0)
+    expect(await offlineDb.syncOutbox.count()).toBe(0)
+    expect(offlineDb.name).toBe('trek-offline-u872-wworkspace-shared')
+    await prepareLocalWorkspace('personal-workspace', 872, true)
+    expect(await offlineDb.trips.get(72)).toBeDefined()
+    expect(await offlineDb.syncOutbox.get('trip:old-personal')).toBeDefined()
   })
 })
 

@@ -8,6 +8,7 @@ import { getApiErrorMessage } from '../../types'
 import { useToast } from '../shared/Toast'
 import CustomSelect from '../shared/CustomSelect'
 import VacayBadge from './VacayBadge'
+import { workspaceMembersApi } from '../../auth/workspaceMembersApi'
 
 const PRESET_COLORS = [
   '#6366f1', '#ec4899', '#14b8a6', '#8b5cf6', '#ef4444',
@@ -32,7 +33,15 @@ export default function VacayPersons() {
   const [selectedInviteUser, setSelectedInviteUser] = useState(null)
   const [inviting, setInviting] = useState(false)
 
-  const loadAvailable = async () => setAvailableUsers([])
+  const loadAvailable = async () => {
+    try {
+      const context = await workspaceMembersApi.context()
+      setAvailableUsers(context.candidates)
+    } catch (err: unknown) {
+      setAvailableUsers([])
+      toast.error(getApiErrorMessage(err, t('vacay.inviteError')))
+    }
+  }
 
   const handleInvite = async () => {
     if (!selectedInviteUser) return

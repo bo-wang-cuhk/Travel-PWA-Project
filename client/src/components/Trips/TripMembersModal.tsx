@@ -10,6 +10,9 @@ import { useTranslation } from '../../i18n'
 import { getApiErrorMessage } from '../../types'
 import CustomSelect from '../shared/CustomSelect'
 import { copyText } from '../../utils/clipboard'
+import { workspaceMembersApi } from '../../auth/workspaceMembersApi'
+import { SUPABASE_AUTH_ENABLED } from '../../auth/supabaseClient'
+import { STANDALONE_MODE } from '../../config/runtimeMode'
 
 interface AvatarProps {
   username: string
@@ -273,6 +276,7 @@ interface TripMembersModalProps {
 }
 
 export default function TripMembersModal({ isOpen, onClose, tripId, tripTitle, onMembersChanged }: TripMembersModalProps) {
+  const workspaceCollab = STANDALONE_MODE && SUPABASE_AUTH_ENABLED
   const [data, setData] = useState(null)
   const [allUsers, setAllUsers] = useState([])
   const [loading, setLoading] = useState(false)
@@ -290,8 +294,8 @@ export default function TripMembersModal({ isOpen, onClose, tripId, tripTitle, o
   const can = useCanDo()
   const trip = useTripStore((s) => s.trip)
   const loadBudgetItems = useTripStore((s) => s.loadBudgetItems)
-  const canManageMembers = can('member_manage', trip)
-  const canManageShare = can('share_manage', trip)
+  const canManageMembers = workspaceCollab ? Boolean(data?.can_manage) : can('member_manage', trip)
+  const canManageShare = !workspaceCollab && can('share_manage', trip)
 
   useEffect(() => {
     if (isOpen && tripId) {
@@ -303,7 +307,16 @@ export default function TripMembersModal({ isOpen, onClose, tripId, tripTitle, o
   const loadMembers = async (notify = false) => {
     setLoading(true)
     try {
-      const d = await tripsApi.getMembers(tripId)
+      const d = workspaceCollab
+        ? await workspaceMembersApi.context().then(context => {
+            const owner = context.members.find(member => member.role === 'owner')
+            return {
+              owner,
+              members: context.members.filter(member => member.role !== 'owner'),
+              can_manage: context.can_manage,
+            }
+          })
+        : await tripsApi.getMembers(tripId)
       setData(d)
       // Notify the planner to re-sync (Costs participants etc.) only after an actual
       // roster mutation — not on the initial open load, which would be a redundant fetch.
@@ -317,8 +330,13 @@ export default function TripMembersModal({ isOpen, onClose, tripId, tripTitle, o
 
   const loadAllUsers = async () => {
     try {
-      const d = await authApi.listUsers()
-      setAllUsers(d.users)
+      if (workspaceCollab) {
+        const context = await workspaceMembersApi.context()
+        setAllUsers(context.candidates)
+      } else {
+        const d = await authApi.listUsers()
+        setAllUsers(d.users)
+      }
     } catch {}
   }
 
@@ -326,9 +344,11 @@ export default function TripMembersModal({ isOpen, onClose, tripId, tripTitle, o
     setAdding(true)
     try {
       const target = allUsers.find(u => String(u.id) === String(selectedUserId))
-      await tripsApi.addMember(tripId, target.username)
+      if (workspaceCollab) await workspaceMembersApi.add(Number(target.id))
+      else await tripsApi.addMember(tripId, target.username)
       setSelectedUserId('')
       await loadMembers(true)
+      if (workspaceCollab) await loadAllUsers()
       toast.success(`${target.username} ${t('members.added')}`)
     } catch (err: unknown) {
       toast.error(getApiErrorMessage(err, t('members.addError')))
@@ -410,9 +430,14 @@ export default function TripMembersModal({ isOpen, onClose, tripId, tripTitle, o
     if (!confirm(msg)) return
     setRemovingId(userId)
     try {
-      await tripsApi.removeMember(tripId, userId)
+      if (workspaceCollab) await workspaceMembersApi.remove(userId)
+      else await tripsApi.removeMember(tripId, userId)
       if (isSelf) { onClose(); window.location.reload() }
-      else { await loadMembers(true); toast.success(t('members.removed')) }
+      else {
+        await loadMembers(true)
+        if (workspaceCollab) await loadAllUsers()
+        toast.success(t('members.removed'))
+      }
     } catch {
       toast.error(t('members.removeError'))
     } finally {
@@ -507,7 +532,9 @@ export default function TripMembersModal({ isOpen, onClose, tripId, tripTitle, o
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {realMembers.map(member => {
                 const isSelf = member.id === user?.id
-                const canRemove = isSelf || (canManageMembers && member.role !== 'owner')
+                const canRemove = workspaceCollab
+                  ? canManageMembers && !isSelf && member.role !== 'owner'
+                  : isSelf || (canManageMembers && member.role !== 'owner')
                 return (
                   <div key={member.id} className="bg-surface-secondary border border-edge-secondary" style={{
                     display: 'flex', alignItems: 'center', gap: 10,
@@ -525,7 +552,7 @@ export default function TripMembersModal({ isOpen, onClose, tripId, tripTitle, o
                         )}
                       </div>
                     </div>
-                    {isCurrentOwner && member.role !== 'owner' && (
+                    {!workspaceCollab && isCurrentOwner && member.role !== 'owner' && (
                       <button type="button"
                         onClick={() => handleTransfer(member.id, member.username)}
                         disabled={transferringId === member.id}
@@ -557,7 +584,7 @@ export default function TripMembersModal({ isOpen, onClose, tripId, tripTitle, o
         </div>
 
         {/* Guests (#1362) — accountless participants, managed by the owner */}
-        {(isCurrentOwner || guests.length > 0) && (
+        {!workspaceCollab && (isCurrentOwner || guests.length > 0) && (
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
             <UserRound size={13} className="text-content-faint" />

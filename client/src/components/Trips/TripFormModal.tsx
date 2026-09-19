@@ -8,6 +8,8 @@ import { useSettingsStore } from '../../store/settingsStore'
 import { useCanDo } from '../../store/permissionsStore'
 import { useToast } from '../shared/Toast'
 import { useTranslation } from '../../i18n'
+import { workspaceMembersApi } from '../../auth/workspaceMembersApi'
+import { STANDALONE_MODE } from '../../config/runtimeMode'
 import { CustomDatePicker } from '../shared/CustomDateTimePicker'
 import { normalizeImageFile } from '../../utils/convertHeic'
 import { getApiErrorMessage, type Trip } from '../../types'
@@ -127,9 +129,16 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
       authApi.getAppConfig().then((c: { trip_reminders_enabled?: boolean }) => {
         if (c?.trip_reminders_enabled !== undefined) setTripRemindersEnabled(c.trip_reminders_enabled)
       }).catch(() => {})
-      authApi.listUsers().then(d => setAllUsers(d.users || [])).catch(() => {})
+      if (STANDALONE_MODE) {
+        workspaceMembersApi.context().then(context => {
+          setAllUsers(context.candidates)
+          setExistingMembers(context.members.filter(member => member.role !== 'owner'))
+        }).catch(() => {})
+      } else {
+        authApi.listUsers().then(d => setAllUsers(d.users || [])).catch(() => {})
+      }
       if (trip) {
-        tripsApi.getMembers(trip.id).then(d => setExistingMembers(d.members || [])).catch(() => {})
+        if (!STANDALONE_MODE) tripsApi.getMembers(trip.id).then(d => setExistingMembers(d.members || [])).catch(() => {})
       }
     }
   }, [trip, isOpen])
@@ -191,7 +200,10 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
         for (const userId of selectedMembers) {
           const user = allUsers.find(u => u.id === userId)
           if (user) {
-            try { await tripsApi.addMember(createdTrip.id, user.username) } catch { memberAddFailed = true }
+            try {
+              if (STANDALONE_MODE) await workspaceMembersApi.add(user.id)
+              else await tripsApi.addMember(createdTrip.id, user.username)
+            } catch { memberAddFailed = true }
           }
         }
         if (memberAddFailed) toast.error(t('trips.memberAddError'))
@@ -647,7 +659,8 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
                     onClick={async () => {
                       if (m.id === currentUser?.id) return
                       try {
-                        await tripsApi.removeMember(trip!.id, m.id)
+                        if (STANDALONE_MODE) await workspaceMembersApi.remove(m.id)
+                        else await tripsApi.removeMember(trip!.id, m.id)
                         setExistingMembers(prev => prev.filter(x => x.id !== m.id))
                         toast.success(t('trips.memberRemoved', { username: m.username }))
                       } catch { toast.error(t('trips.memberRemoveError')) }
@@ -682,7 +695,8 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
                     const user = allUsers.find(u => u.id === Number(value))
                     if (user) {
                       try {
-                        await tripsApi.addMember(trip.id, user.username)
+                        if (STANDALONE_MODE) await workspaceMembersApi.add(user.id)
+                        else await tripsApi.addMember(trip.id, user.username)
                         setExistingMembers(prev => [...prev, { id: user.id, username: user.username }])
                         toast.success(t('trips.memberAdded', { username: user.username }))
                       } catch { toast.error(t('trips.memberAddError')) }

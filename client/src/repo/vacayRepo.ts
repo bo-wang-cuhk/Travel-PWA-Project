@@ -7,6 +7,10 @@ import { DEFAULT_YEAR_SETTINGS, inGridWindow } from '../vacay/yearWindow'
 import { getHolidays as getGermanHolidays } from '../components/Vacay/holidays'
 import { holidayService } from '../services/holiday/HolidayService'
 import type { HolidayDataStatus } from '../services/holiday/types'
+import { workspaceMembersApi, type WorkspacePerson } from '../auth/workspaceMembersApi'
+import { SUPABASE_AUTH_ENABLED } from '../auth/supabaseClient'
+
+const MEMBER_COLORS = ['#3b82f6', '#ec4899', '#14b8a6', '#8b5cf6', '#ef4444', '#22c55e']
 
 function currentUser(): VacayUser {
   try {
@@ -50,11 +54,49 @@ function computeStats(value: LocalVacayRecord, year: number): VacayStat[] {
   })
 }
 
+function withWorkspaceUsers(value: LocalVacayRecord, members: WorkspacePerson[]): LocalVacayRecord {
+  const colors = new Map(value.users.map(user => [user.id, user.color]))
+  return {
+    ...value,
+    users: members.map((member, index) => ({
+      id: member.id,
+      username: member.display_name || member.username,
+      color: colors.get(member.id) || MEMBER_COLORS[index % MEMBER_COLORS.length],
+    })),
+  }
+}
+
 export const vacayRepo = {
-  async getPlan() { const value = await read(); return { plan: value.plan, users: value.users, pendingInvites: [], incomingInvites: [], isOwner: true, isFused: false } },
+  async getPlan() {
+    let value = await read()
+    let isOwner = true
+    if (SUPABASE_AUTH_ENABLED && typeof navigator !== 'undefined' && navigator.onLine) {
+      try {
+        const context = await workspaceMembersApi.context()
+        value = withWorkspaceUsers(value, context.members)
+        await offlineDb.vacayData.put(value)
+        isOwner = context.can_manage
+      } catch { /* Keep the cached workspace roster when offline/unavailable. */ }
+    }
+    return { plan: value.plan, users: value.users, pendingInvites: [], incomingInvites: [], isOwner, isFused: value.users.length > 1 }
+  },
   async updatePlan(data: Partial<VacayPlan>) { const value = await read(); value.plan = { ...value.plan, ...data }; const next = await write(value); return { plan: next.plan } },
   async updateColor(color: string, targetUserId?: number) { const value = await read(); const id = targetUserId ?? currentUser().id; value.users = value.users.map(user => user.id === id ? { ...user, color } : user); await write(value); return { success: true } },
-  async invite() { return { success: false } }, async acceptInvite() { return { success: false } }, async declineInvite() { return { success: false } }, async cancelInvite() { return { success: false } }, async dissolve() { return { success: false } },
+  async invite(userId: number) {
+    const context = await workspaceMembersApi.add(userId)
+    const value = withWorkspaceUsers(await read(), context.members)
+    await write(value)
+    return { success: true }
+  },
+  async acceptInvite() { return { success: false } },
+  async declineInvite() { return { success: false } },
+  async cancelInvite(userId: number) {
+    const context = await workspaceMembersApi.remove(userId)
+    const value = withWorkspaceUsers(await read(), context.members)
+    await write(value)
+    return { success: true }
+  },
+  async dissolve() { return { success: false } },
   async getYears() { return { years: (await read()).years } },
   async addYear(year: number) { const value = await read(); value.years = [...new Set([...value.years, year])].sort(); await write(value); return { years: value.years } },
   async removeYear(year: number) { const value = await read(); value.years = value.years.filter(v => v !== year); await write(value); return { years: value.years } },

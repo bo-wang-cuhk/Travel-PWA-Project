@@ -8,3 +8,6 @@ verify_jwt = true
 
 [functions.place-search]
 verify_jwt = true
+
+[functions.workspace-members]
+verify_jwt = true

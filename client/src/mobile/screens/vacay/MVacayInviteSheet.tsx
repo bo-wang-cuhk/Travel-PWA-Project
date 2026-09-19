@@ -6,6 +6,7 @@ import { useVacayStore } from '../../../store/vacayStore'
 import { useTranslation } from '../../../i18n'
 import { useToast } from '../../../components/shared/Toast'
 import { getApiErrorMessage, type VacayUser } from '../../../types'
+import { workspaceMembersApi } from '../../../auth/workspaceMembersApi'
 
 interface MVacayInviteSheetProps {
   open: boolean
@@ -30,7 +31,15 @@ export default function MVacayInviteSheet({ open, onClose }: MVacayInviteSheetPr
     if (!open) return
     setSelected(null)
     setPickerOpen(false)
-    setAvailable([])
+    void workspaceMembersApi.context()
+      .then(context => setAvailable(context.candidates.map(user => ({ id: user.id, username: user.display_name || user.username, color: null }))))
+      .catch(err => {
+        setAvailable([])
+        toast.error(getApiErrorMessage(err, t('vacay.inviteError')))
+      })
+  // Opening the sheet is the fetch boundary. `useToast()` intentionally returns
+  // a small facade object per render, so including it here would refetch forever.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   const selectedUser = available.find(u => u.id === selected)
