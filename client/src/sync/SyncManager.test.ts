@@ -16,6 +16,8 @@ import { fileRepo } from '../repo/fileRepo'
 import type { LocalChange, ProviderStatus, PushResult, RemoteChanges, SyncEntityType, SyncProvider } from './types'
 import type { TripFile } from '../types'
 import { SyncManager } from './SyncManager'
+import { emptyAtlas } from '../domain/atlasSyncModel'
+import { markLocalChange } from './localChangeRepository'
 
 class MemoryProvider implements SyncProvider {
   readonly id: string
@@ -84,6 +86,19 @@ class LastWriteWinsProvider extends MemoryProvider {
 beforeEach(async () => { await clearAll() })
 
 describe('local-first SyncManager', () => {
+  it('pushes a personal Atlas document and restores it on a fresh device', async () => {
+    const provider = new LastWriteWinsProvider()
+    const owner = '22222222-2222-4222-8222-222222222222'
+    await offlineDb.transaction('rw', [offlineDb.atlasData, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
+      await offlineDb.atlasData.put({ ...emptyAtlas(owner), manualCountries: ['JP'] })
+      await markLocalChange('atlas', owner, 'upsert')
+    })
+    expect((await new SyncManager(provider).sync()).pushed).toBe(1)
+    expect(provider.remote.get(owner)?.payload).toMatchObject({ manualCountries: ['JP'] })
+    await clearAll()
+    expect((await new SyncManager(provider).sync()).pulled).toBe(1)
+    expect((await offlineDb.atlasData.get(owner))?.manualCountries).toEqual(['JP'])
+  })
   it('syncs attachment metadata and binary body to a fresh device', async () => {
     if (!URL.createObjectURL) Object.defineProperty(URL, 'createObjectURL', { value: () => 'blob:test' })
     const provider = new LastWriteWinsProvider()

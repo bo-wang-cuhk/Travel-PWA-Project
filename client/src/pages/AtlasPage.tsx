@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from '../i18n'
 import Navbar from '../components/Layout/Navbar'
-import apiClient from '../api/client'
+import atlasClient from './atlas/atlasClient'
 import CustomSelect from '../components/shared/CustomSelect'
 import EmptyState from '../components/shared/EmptyState'
 import { Globe, MapPin, Briefcase, Calendar, Flag, PanelLeftOpen, PanelLeftClose, X, Star, Plus, Trash2, Search } from 'lucide-react'
@@ -185,7 +185,7 @@ function AtlasPageDesktop(): React.ReactElement {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <button type="button" onClick={async () => {
                   try {
-                    await apiClient.post(`/addons/atlas/country/${confirmAction.code}/mark`)
+                    await atlasClient.post(`/addons/atlas/country/${confirmAction.code}/mark`)
                     setData(prev => (prev ? withCountryMarkedVisited(prev, confirmAction.code) : prev))
                   } catch (err) {
                     toast.error(getApiErrorMessage(err, t('common.error')))
@@ -245,7 +245,7 @@ function AtlasPageDesktop(): React.ReactElement {
                   const { code: countryCode, name: rName, regionCode: rCode } = confirmAction
                   if (!rCode) return
                   try {
-                    await apiClient.post(`/addons/atlas/region/${rCode}/mark`, { name: rName, country_code: countryCode })
+                    await atlasClient.post(`/addons/atlas/region/${rCode}/mark`, { name: rName, country_code: countryCode })
                     setVisitedRegions(prev => {
                       const existing = prev[countryCode] || []
                       if (existing.find(r => r.code === rCode)) return prev
@@ -315,7 +315,7 @@ function AtlasPageDesktop(): React.ReactElement {
                     const { code: countryCode, regionCode: rCode } = confirmAction
                     if (!rCode) return
                     try {
-                      await apiClient.delete(`/addons/atlas/region/${rCode}/mark`)
+                      await atlasClient.delete(`/addons/atlas/region/${rCode}/mark`)
                       setVisitedRegions(prev => {
                         const remaining = (prev[countryCode] || []).filter(r => r.code !== rCode)
                         const next = { ...prev, [countryCode]: remaining }
@@ -400,7 +400,7 @@ function AtlasPageDesktop(): React.ReactElement {
                       return
                     }
                     try {
-                      const r = await apiClient.post('/addons/atlas/bucket-list', { name: confirmAction.name, country_code: confirmAction.code, target_date: targetDate })
+                      const r = await atlasClient.post('/addons/atlas/bucket-list', { name: confirmAction.name, country_code: confirmAction.code, target_date: targetDate })
                       setBucketList(prev => [r.data.item, ...prev])
                     } catch (err) {
                       if (isBucketDuplicateError(err)) {
@@ -462,7 +462,7 @@ interface SidebarContentProps {
   bucketForm: { name: string; notes: string; lat: string; lng: string; target_date: string }
   setBucketForm: (f: { name: string; notes: string; lat: string; lng: string; target_date: string }) => void
   onAddBucket: () => Promise<void>
-  onDeleteBucket: (id: number) => Promise<void>
+  onDeleteBucket: (id: string | number) => Promise<void>
   onSearchBucket: () => Promise<void>
   onSelectBucketPoi: (result: any) => void
   bucketSearchResults: any[]

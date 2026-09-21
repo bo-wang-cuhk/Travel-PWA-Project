@@ -7,6 +7,7 @@ import { buildAtlasController, buildAtlasData, buildBucketItem, buildCountryDeta
 import type { AtlasController } from '../mobile/screens/atlas/atlasController';
 import type { AtlasData, CountryDetail } from './atlas/atlasModel';
 import AtlasPage from './AtlasPage';
+import { useSettingsStore } from '../store/settingsStore';
 
 // FE-PAGE-ATLASW-001 to FE-PAGE-ATLASW-034
 //
@@ -503,7 +504,8 @@ describe('AtlasPage wiring', () => {
       render(<AtlasPage />);
 
       expect(screen.getByText('Kyoto')).toBeInTheDocument();
-      expect(screen.getByText('Apr 2027')).toBeInTheDocument();
+      const language = useSettingsStore.getState().settings.language || 'zh';
+      expect(screen.getByText(new Date(2027, 3).toLocaleString(language, { month: 'short', year: 'numeric' }))).toBeInTheDocument();
       expect(screen.getByText('road trip')).toBeInTheDocument();
       expect(screen.getByText('2030')).toBeInTheDocument();
       expect((document.querySelector('img[alt="JP"]') as HTMLImageElement).src).toContain('flagcdn.com/w40/jp.png');
@@ -538,7 +540,8 @@ describe('AtlasPage wiring', () => {
 
       const [monthTrigger, yearTrigger] = selectTriggers();
       fireEvent.click(monthTrigger);
-      fireEvent.click(screen.getByText('Mar'));
+      const language = useSettingsStore.getState().settings.language || 'zh';
+      fireEvent.click(screen.getByText(new Date(2000, 2).toLocaleString(language, { month: 'short' })));
       expect(atlas.setBucketPoiMonth).toHaveBeenCalledWith(3);
 
       const nextYear = String(new Date().getFullYear() + 2);

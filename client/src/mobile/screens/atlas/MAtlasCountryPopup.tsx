@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ChevronRight, MapPin, Star, Trash2 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import apiClient from '../../../api/client'
+import atlasClient from '../../../pages/atlas/atlasClient'
 import { continentForCountry } from '@trek/shared'
 import { findBucketDuplicate, isBucketDuplicateError, withCountryMarkedVisited } from '../../../pages/atlas/atlasModel'
 import { getApiErrorMessage } from '../../../types'
@@ -81,7 +81,7 @@ export default function MAtlasCountryPopup({ atlas }: MAtlasCountryPopupProps) {
     if (!confirmAction) return
     const { code } = confirmAction
     try {
-      await apiClient.post(`/addons/atlas/country/${code}/mark`)
+      await atlasClient.post(`/addons/atlas/country/${code}/mark`)
       setData((prev) => (prev ? withCountryMarkedVisited(prev, code) : prev))
     } catch (err) {
       toast.error(getApiErrorMessage(err, t('common.error')))
@@ -94,7 +94,7 @@ export default function MAtlasCountryPopup({ atlas }: MAtlasCountryPopupProps) {
     const { code: countryCode, name: regionName, regionCode } = confirmAction
     if (!regionCode) return
     try {
-      await apiClient.post(`/addons/atlas/region/${regionCode}/mark`, { name: regionName, country_code: countryCode })
+      await atlasClient.post(`/addons/atlas/region/${regionCode}/mark`, { name: regionName, country_code: countryCode })
       setVisitedRegions((prev) => {
         const existing = prev[countryCode] || []
         if (existing.find((r) => r.code === regionCode)) return prev
@@ -112,7 +112,7 @@ export default function MAtlasCountryPopup({ atlas }: MAtlasCountryPopupProps) {
     const { code: countryCode, regionCode } = confirmAction
     if (!regionCode) return
     try {
-      await apiClient.delete(`/addons/atlas/region/${regionCode}/mark`)
+      await atlasClient.delete(`/addons/atlas/region/${regionCode}/mark`)
       setVisitedRegions((prev) => {
         const remaining = (prev[countryCode] || []).filter((r) => r.code !== regionCode)
         const next = { ...prev, [countryCode]: remaining }
@@ -153,7 +153,7 @@ export default function MAtlasCountryPopup({ atlas }: MAtlasCountryPopupProps) {
       return
     }
     try {
-      const r = await apiClient.post('/addons/atlas/bucket-list', {
+      const r = await atlasClient.post('/addons/atlas/bucket-list', {
         name: confirmAction.name,
         country_code: confirmAction.code,
         target_date: targetDate,

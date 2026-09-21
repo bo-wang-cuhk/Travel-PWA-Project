@@ -17,6 +17,7 @@ const TABLE_BY_ENTITY: Record<SyncEntityType, string> = {
   packingConfig: 'packing_configs',
   tripFile: 'trip_files',
   vacay: 'vacay_records',
+  atlas: 'atlas_records',
 }
 
 interface CloudChangeRow {

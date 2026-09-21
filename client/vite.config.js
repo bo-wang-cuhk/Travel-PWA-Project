@@ -71,7 +71,7 @@ export default defineConfig(({ mode }) => {
         // comment is the only record of what the install actually costs. Anything
         // matching the globs below is fetched at service-worker install by every
         // user, whether or not they ever reach the code.
-        globPatterns: ['**/*.{js,css,html,svg,png,woff,woff2,ttf}'],
+        globPatterns: ['**/*.{js,css,html,svg,png,woff,woff2,ttf,gz}'],
         // build:analyze drops a treemap next to the app; it must never end up in a
         // precache manifest if someone ships that build by accident.
         globIgnores: ['**/stats.html'],

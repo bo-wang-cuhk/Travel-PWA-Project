@@ -9,6 +9,7 @@ import { applySyncedBudgetItem, toSyncedBudgetItem, type LocalBudgetItemRecord, 
 import { applySyncedTodo, toSyncedTodo, type LocalTodoRecord, type SyncedTodo } from '../domain/todoSyncModel'
 import { applySyncedPackingBag, applySyncedPackingConfig, applySyncedPackingItem, toSyncedPackingBag, toSyncedPackingConfig, toSyncedPackingItem, type LocalPackingBagRecord, type LocalPackingItemRecord, type SyncedPackingBag, type SyncedPackingConfig, type SyncedPackingItem } from '../domain/packingSyncModel'
 import { applySyncedVacay, toSyncedVacay, VACAY_SYNC_ID, type SyncedVacay } from '../domain/vacaySyncModel'
+import { isSyncedAtlas, type SyncedAtlas } from '../domain/atlasSyncModel'
 import { applySyncedTrip, toSyncedTrip, type SyncedTrip } from '../domain/tripSyncModel'
 import { applySyncedTripFile, toSyncedTripFile, type LocalTripFileRecord, type SyncedTripFile } from '../domain/tripFileSyncModel'
 import { syncEntityKey } from './localChangeRepository'
@@ -469,6 +470,19 @@ export class SyncManager {
     })
   }
 
+  private async applyRemoteAtlas(change: RemoteChange): Promise<'applied' | 'conflict' | 'unchanged'> {
+    const key = syncEntityKey('atlas', change.entityId)
+    return offlineDb.transaction('rw', [offlineDb.atlasData, offlineDb.entitySyncMeta], async () => {
+      const meta = await offlineDb.entitySyncMeta.get(key)
+      if (meta?.remoteVersion === change.remoteVersion) return 'unchanged'
+      const remote = change.payload as SyncedAtlas
+      if (!isSyncedAtlas(remote, change.entityId)) throw new Error('Invalid remote Atlas document')
+      await offlineDb.atlasData.put(remote)
+      await offlineDb.entitySyncMeta.put({ key, entityType: 'atlas', entityId: change.entityId, status: 'synced', remoteVersion: change.remoteVersion, lastSyncedAt: Date.now(), lastError: null })
+      return 'applied'
+    })
+  }
+
   private async applyRemotePackingConfig(change: RemoteChange): Promise<'applied' | 'conflict' | 'unchanged'> {
     const key = syncEntityKey(change.entityType, change.entityId)
     return offlineDb.transaction('rw', [offlineDb.packingConfig, offlineDb.syncOutbox, offlineDb.entitySyncMeta, offlineDb.syncConflicts], async () => {
@@ -538,6 +552,7 @@ export class SyncManager {
     if (change.entityType === 'packingConfig') return this.applyRemotePackingConfig(change)
     if (change.entityType === 'tripFile') return this.applyRemoteTripFile(change)
     if (change.entityType === 'vacay') return this.applyRemoteVacay(change)
+    if (change.entityType === 'atlas') return this.applyRemoteAtlas(change)
     return this.applyRemoteTrip(change)
   }
 
@@ -586,6 +601,9 @@ export class SyncManager {
       } else if (row.entityType === 'vacay') {
         const value = await offlineDb.vacayData.get(VACAY_SYNC_ID); if (!value) continue
         changes.push({ entityType: 'vacay', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedVacay(value) })
+      } else if (row.entityType === 'atlas') {
+        const value = await offlineDb.atlasData.get(row.entityId); if (!value) continue
+        changes.push({ entityType: 'atlas', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: value })
       } else if (row.entityType === 'packingConfig') {
         const value = await offlineDb.packingConfig.get('personal-packing'); if (!value) continue
         changes.push({ entityType: 'packingConfig', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedPackingConfig(value) })
@@ -594,7 +612,7 @@ export class SyncManager {
         changes.push({ entityType: 'tripFile', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedTripFile(value) })
       }
     }
-    const order = { trip: 0, day: 1, dayNote: 2, place: 2, assignment: 3, accommodation: 4, reservation: 5, budgetItem: 6, todo: 6, packingBag: 6, packingItem: 7, tripFile: 8, packingConfig: 9, vacay: 9 } as const
+    const order = { trip: 0, day: 1, dayNote: 2, place: 2, assignment: 3, accommodation: 4, reservation: 5, budgetItem: 6, todo: 6, packingBag: 6, packingItem: 7, tripFile: 8, packingConfig: 9, vacay: 9, atlas: 9 } as const
     const queued = new Map(outbox.map(row => [row.key, row]))
     return changes.map(change => {
       const row = queued.get(syncEntityKey(change.entityType, change.entityId))
@@ -633,7 +651,7 @@ export class SyncManager {
     // Pull from the device's previous cursor, not the post-push cursor: this
     // downloads our server-stamped revisions plus any concurrent device writes.
     const remote = await this.provider.pull(previousCursor)
-    const order = { trip: 0, day: 1, dayNote: 2, place: 2, assignment: 3, accommodation: 4, reservation: 5, budgetItem: 6, todo: 6, packingBag: 6, packingItem: 7, tripFile: 8, packingConfig: 9, vacay: 9 } as const
+    const order = { trip: 0, day: 1, dayNote: 2, place: 2, assignment: 3, accommodation: 4, reservation: 5, budgetItem: 6, todo: 6, packingBag: 6, packingItem: 7, tripFile: 8, packingConfig: 9, vacay: 9, atlas: 9 } as const
     const ordered = [...remote.changes].sort((a, b) => order[a.entityType] - order[b.entityType])
     let pulled = 0
     for (const change of ordered) {
@@ -666,7 +684,7 @@ export class SyncManager {
       const remote = await this.provider.pull(previous?.cursor)
       let pulled = 0
       let conflicts = 0
-      const dependencyOrder = { trip: 0, day: 1, dayNote: 2, place: 2, assignment: 3, accommodation: 4, reservation: 5, budgetItem: 6, todo: 6, packingBag: 6, packingItem: 7, tripFile: 8, packingConfig: 9, vacay: 9 } as const
+      const dependencyOrder = { trip: 0, day: 1, dayNote: 2, place: 2, assignment: 3, accommodation: 4, reservation: 5, budgetItem: 6, todo: 6, packingBag: 6, packingItem: 7, tripFile: 8, packingConfig: 9, vacay: 9, atlas: 9 } as const
       const orderedRemoteChanges = [...remote.changes].sort(
         (a, b) => dependencyOrder[a.entityType] - dependencyOrder[b.entityType],
       )

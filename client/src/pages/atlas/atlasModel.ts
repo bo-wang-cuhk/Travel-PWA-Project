@@ -98,7 +98,7 @@ export interface AtlasPlaceHit {
 }
 
 export interface BucketItem {
-  id: number
+  id: string | number
   name: string
   lat: number | null
   lng: number | null

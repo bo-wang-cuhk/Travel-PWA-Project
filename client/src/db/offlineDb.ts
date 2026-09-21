@@ -12,6 +12,7 @@ import type { LocalTodoRecord, StoredTodoRecord } from '../domain/todoSyncModel'
 import type { LocalPackingConfigRecord, LocalPackingItemRecord, StoredPackingBagRecord, StoredPackingItemRecord } from '../domain/packingSyncModel';
 import type { LocalVacayRecord } from '../domain/vacaySyncModel';
 import type { LocalTripFileRecord, StoredTripFileRecord } from '../domain/tripFileSyncModel';
+import type { LocalAtlasRecord } from '../domain/atlasSyncModel';
 import type { HolidayCacheRecord } from '../services/holiday/types';
 import type {
   EntitySyncMetaRecord,
@@ -177,6 +178,7 @@ class TrekOfflineDb extends Dexie {
   packingConfig!: Table<LocalPackingConfigRecord, string>;
   todoItems!: Table<StoredTodoRecord, number>;
   vacayData!: Table<LocalVacayRecord, string>;
+  atlasData!: Table<LocalAtlasRecord, string>;
   holidayCache!: Table<HolidayCacheRecord, string>;
   budgetItems!: Table<StoredBudgetItemRecord, number>;
   reservations!: Table<StoredReservationRecord, number>;
@@ -708,6 +710,10 @@ class TrekOfflineDb extends Dexie {
         await tx.table('entitySyncMeta').put({ key, entityType: 'tripFile', entityId: row.sync_id, status: orphan ? 'error' : 'pending', remoteVersion: null, lastSyncedAt: null, lastError: orphan ? 'File relation was not found during migration' : null });
       }
     });
+
+    // v19: private Atlas choices. Derived Trip/Place statistics and public
+    // geometry do not belong in this user-data table.
+    this.version(19).stores({ atlasData: 'id, updatedAt' });
   }
 }
 

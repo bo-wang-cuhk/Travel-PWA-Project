@@ -6,13 +6,15 @@ import { useTileUrl } from '../../hooks/useTileUrl'
 import { OFM_DARK, OFM_POSITRON } from '../../constants/mapDefaults'
 import { attachVectorBasemap, hideLabelLayers, type GlLeafletLayer } from '../../components/Map/VectorBasemap'
 import { isVectorStyle } from '../../utils/tileUrl'
-import apiClient, { mapsApi, pluginsApi, type PluginAtlasLayer } from '../../api/client'
+import { mapsApi, pluginsApi, type PluginAtlasLayer } from '../../api/client'
+import atlasClient from './atlasClient'
 import L from 'leaflet'
 import type { GeoJsonFeatureCollection } from '../../types'
 import { A2_TO_A3, countryStatus, findBucketDuplicate, isBucketDuplicateError, isCountryVisible, normalizeRegionName, regionCacheEvictions, withCountryMarkedVisited, wishlistA3Codes, countryColor, REGION_CACHE_MAX, bucketTooltipWidth, bucketTooltipPlacement, bucketTooltipNeedsScroll, type AtlasData, type AtlasPlaceHit, type CountryDetail, type BucketItem } from './atlasModel'
 import { continentForCountry, escapeHtml, type VisitStatus } from '@trek/shared'
 import { useToast } from '../../components/shared/Toast'
 import { getApiErrorMessage } from '../../types'
+import { STANDALONE_MODE } from '../../config/runtimeMode'
 
 const PLANNED_KEY = 'trek_atlas_show_planned'
 
@@ -225,8 +227,8 @@ export function useAtlas() {
   // Load atlas data + bucket list
   useEffect(() => {
     Promise.all([
-      apiClient.get('/addons/atlas/stats'),
-      apiClient.get('/addons/atlas/bucket-list'),
+      atlasClient.get('/addons/atlas/stats'),
+      atlasClient.get('/addons/atlas/bucket-list'),
     ]).then(([statsRes, bucketRes]) => {
       setData(statsRes.data)
       setBucketList(bucketRes.data.items || [])
@@ -234,13 +236,26 @@ export function useAtlas() {
     }).catch(() => setLoading(false))
   }, [])
 
-  // Load country-border GeoJSON from our API (geoBoundaries, served server-side —
-  // no third-party fetch from the browser). Even gzipped the payload is a few MB, so
-  // it gets a longer timeout than the global 8s default to survive slow links and
-  // reverse-proxy / Cloudflare-Tunnel setups instead of aborting and leaving the map
-  // with no countries (#1254).
   useEffect(() => {
-    apiClient.get('/addons/atlas/countries/geo', { timeout: 30000 })
+    const refresh = () => {
+      Promise.all([
+        atlasClient.get('/addons/atlas/stats'),
+        atlasClient.get('/addons/atlas/bucket-list'),
+        atlasClient.get('/addons/atlas/regions'),
+      ]).then(([stats, bucket, regions]) => {
+        setData(stats.data)
+        setBucketList(bucket.data.items || [])
+        setVisitedRegions(regions.data.regions || {})
+      }).catch(() => {})
+    }
+    window.addEventListener('travel-sync-complete', refresh)
+    return () => window.removeEventListener('travel-sync-complete', refresh)
+  }, [])
+
+  // Standalone mode loads bundled, PWA-precached boundaries; TREK Server mode
+  // retains its existing API. Keep the longer legacy timeout for slow links.
+  useEffect(() => {
+    atlasClient.get('/addons/atlas/countries/geo', { timeout: 30000 })
       .then(res => {
         const geo = res.data
         // Dynamically build A2→A3 mapping from GeoJSON
@@ -261,7 +276,7 @@ export function useAtlas() {
 
   // Load visited regions (geocoded from places/trips) — once on mount
   useEffect(() => {
-    apiClient.get(`/addons/atlas/regions?_t=${Date.now()}`)
+    atlasClient.get(`/addons/atlas/regions?_t=${Date.now()}`)
       .then(r => setVisitedRegions(r.data?.regions || {}))
       .catch(() => {})
   }, [])
@@ -269,6 +284,7 @@ export function useAtlas() {
   // Load plugin tint layers (atlasLayerProvider hook) — once on mount. Fail-safe:
   // an error just means no plugin overlay, the core map is untouched.
   useEffect(() => {
+    if (STANDALONE_MODE) { setPluginLayers([]); return }
     pluginsApi.atlasLayers()
       .then(r => setPluginLayers(r.layers || []))
       .catch(() => setPluginLayers([]))
@@ -342,7 +358,7 @@ export function useAtlas() {
     }
     if (!toLoad.length) return
     for (const code of toLoad) pendingRegionCodes.current.add(code)
-    apiClient.get(`/addons/atlas/regions/geo?countries=${toLoad.join(',')}`)
+    atlasClient.get(`/addons/atlas/regions/geo?countries=${toLoad.join(',')}`)
       .then(geoRes => {
         const geo = geoRes.data
         if (!geo?.features) return
@@ -930,7 +946,7 @@ export function useAtlas() {
 
     let info: { country_code: string | null; region_code: string | null; region_name: string | null }
     try {
-      info = (await apiClient.get('/addons/atlas/locate', { params: { lat: hit.lat, lng: hit.lng } })).data
+      info = (await atlasClient.get('/addons/atlas/locate', { params: { lat: hit.lat, lng: hit.lng } })).data
     } catch {
       return // The map already moved; a failed lookup just means no dialog.
     }
@@ -988,14 +1004,19 @@ export function useAtlas() {
   const executeConfirmAction = async (): Promise<void> => {
     if (!confirmAction) return
     const { type, code } = confirmAction
+    try {
+      if (type === 'mark') await atlasClient.post(`/addons/atlas/country/${code}/mark`)
+      else await atlasClient.delete(`/addons/atlas/country/${code}/mark`)
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, t('common.error')))
+      return
+    }
     setConfirmAction(null)
 
-    // Update local state immediately (no API reload = no map re-render flash)
+    // IndexedDB has accepted the write; update visible state without reloading the map.
     if (type === 'mark') {
-      apiClient.post(`/addons/atlas/country/${code}/mark`).catch(() => {})
       setData(prev => (prev ? withCountryMarkedVisited(prev, code) : prev))
     } else {
-      apiClient.delete(`/addons/atlas/country/${code}/mark`).catch(() => {})
       setSelectedCountry(null)
       setCountryDetail(null)
       setData(prev => {
@@ -1037,7 +1058,7 @@ export function useAtlas() {
       if (bucketForm.notes.trim()) data.notes = bucketForm.notes.trim()
       if (hasCoords) { data.lat = lat; data.lng = lng }
       if (targetDate) data.target_date = targetDate
-      const r = await apiClient.post('/addons/atlas/bucket-list', data)
+      const r = await atlasClient.post('/addons/atlas/bucket-list', data)
       setBucketList(prev => [r.data.item, ...prev])
       setBucketForm({ name: '', notes: '', lat: '', lng: '', target_date: '' })
       setBucketSearch(''); setBucketSearchResults([]); setBucketPoiMonth(0); setBucketPoiYear(0)
@@ -1048,9 +1069,9 @@ export function useAtlas() {
     }
   }
 
-  const handleDeleteBucketItem = async (id: number): Promise<void> => {
+  const handleDeleteBucketItem = async (id: string | number): Promise<void> => {
     try {
-      await apiClient.delete(`/addons/atlas/bucket-list/${id}`)
+      await atlasClient.delete(`/addons/atlas/bucket-list/${id}`)
       setBucketList(prev => prev.filter(i => i.id !== id))
     } catch { /* */ }
   }
@@ -1146,7 +1167,7 @@ export function useAtlas() {
   const loadCountryDetail = async (code: string): Promise<void> => {
     setSelectedCountry(code)
     try {
-      const r = await apiClient.get(`/addons/atlas/country/${code}`)
+      const r = await atlasClient.get(`/addons/atlas/country/${code}`)
       setCountryDetail(r.data)
     } catch { /* */ }
   }
