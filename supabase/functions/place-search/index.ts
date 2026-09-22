@@ -135,8 +135,10 @@ Deno.serve(async (req: Request) => {
       }
       const providers = []
       const baiduKey = Deno.env.get('BAIDU_MAPS_AK')
+      const baiduSecurityKey = Deno.env.get('BAIDU_MAPS_SK')
       const googleKey = Deno.env.get('GOOGLE_PLACES_API_KEY')
-      if (baiduKey) providers.push(new BaiduProvider(baiduKey))
+      console.info('[place-search:configuration]', { baidu: Boolean(baiduKey), baiduSn: Boolean(baiduSecurityKey), google: Boolean(googleKey) })
+      if (baiduKey) providers.push(new BaiduProvider(baiduKey, baiduSecurityKey))
       if (googleKey) providers.push(new GoogleProvider(googleKey))
       providers.push(new OSMProvider(NOMINATIM_URL, APP_USER_AGENT))
       return json(await searchWithFallback({ q, lang: body.lang, limit: clampLimit(body.limit), bounds }, providers))

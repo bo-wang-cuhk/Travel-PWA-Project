@@ -1,11 +1,20 @@
 import { osmRequest } from '../../../../supabase/functions/place-search/osmRequest'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BaiduProvider, GoogleProvider, OSMProvider, searchWithFallback } from '../../../../supabase/functions/place-search/providers'
+import { BaiduProvider, baiduSignature, GoogleProvider, OSMProvider, searchWithFallback } from '../../../../supabase/functions/place-search/providers'
 
 const query = { q: '故宫', limit: 8 }
 afterEach(() => vi.unstubAllGlobals())
 
 describe('place-search fallback', () => {
+  it('matches Baidu documented SN signature and signs requests when SK is configured', async () => {
+    expect(baiduSignature('/geocoder/v2/', new URLSearchParams('address=%E7%99%BE%E5%BA%A6%E5%A4%A7%E5%8E%A6&output=json&ak=yourak'), 'yoursk'))
+      .toBe('7de5a22212ffaa9e326444c75a58f9a0')
+    const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ status: 0, results: [] }) })
+    vi.stubGlobal('fetch', fetch)
+    await new BaiduProvider('ak', 'sk').search(query)
+    expect(new URL(fetch.mock.calls[0][0]).searchParams.get('sn')).toMatch(/^[a-f0-9]{32}$/)
+  })
+
   it('uses Baidu first and converts its coordinates to WGS84', async () => {
     const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({
       status: 0, results: [{ uid: 'bd-1', name: '故宫博物院', address: '景山前街4号',
@@ -19,6 +28,8 @@ describe('place-search fallback', () => {
     expect(result.places[0]).toMatchObject({ name: '故宫博物院', source: 'baidu', externalPlaceId: 'bd-1' })
     expect(result.places[0].longitude).toBeLessThan(116.4035)
     expect(fetch.mock.calls[0][0]).toContain('ret_coordtype=gcj02ll')
+    expect(fetch.mock.calls[0][0]).toContain('/place/v2/suggestion?')
+    expect(fetch.mock.calls[0][0]).toContain('city_limit=false')
   })
 
   it('normalizes a Google Places response after Baidu fails', async () => {

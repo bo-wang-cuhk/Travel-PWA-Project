@@ -85,6 +85,7 @@ const places: TranslationStrings = {
   'places.loadingDetails': '正在載入地點詳情…',
   'places.osmHint': '使用 OpenStreetMap 搜尋（無照片、營業時間或評分）。在設定中新增 Google API 金鑰以獲取完整資訊。',
   'places.osmActive': '正在使用 OpenStreetMap。加入 Google API 金鑰可取得評分與營業時間。',
+  'places.searchSource': '搜尋結果來源：{source}',
   'places.details.title': '地點詳細資料',
   'places.details.empty': '選擇一筆搜尋結果即可查看圖片與描述。',
   'places.details.loading': '正在載入詳細資料...',

@@ -1,4 +1,5 @@
 import { osmRequest } from './osmRequest.ts'
+import { createHash } from 'node:crypto'
 
 export interface PlaceSearchBounds {
   low: { lat: number; lng: number }
@@ -110,13 +111,13 @@ interface BaiduRow {
 
 export class BaiduProvider implements PlaceSearchProvider {
   readonly name = 'baidu'
-  constructor(private readonly key: string) {}
+  constructor(private readonly key: string, private readonly securityKey?: string) {}
 
   async search(query: PlaceSearchQuery): Promise<PlaceSearchResult[]> {
-    // Suggestion accepts a nationwide region. With a viewport, send its centre
-    // as a ranking bias; neither parameter restricts results to that region.
+    // Place v2 documents nationwide search; v3 suggestion documents only a
+    // city-level region. With a viewport, send its centre as a ranking bias.
     const params = new URLSearchParams({
-      query: query.q, region: '全国', region_limit: 'false', ak: this.key,
+      query: query.q, region: '全国', city_limit: 'false', ak: this.key,
       output: 'json', ret_coordtype: 'gcj02ll',
     })
     if (query.bounds) {
@@ -124,7 +125,9 @@ export class BaiduProvider implements PlaceSearchProvider {
       params.set('location', `${(low.lat + high.lat) / 2},${(low.lng + high.lng) / 2}`)
       params.set('coord_type', '1')
     }
-    const data = await fetchJson(`https://api.map.baidu.com/place/v3/suggestion?${params}`) as {
+    const path = '/place/v2/suggestion'
+    if (this.securityKey) params.set('sn', baiduSignature(path, params, this.securityKey))
+    const data = await fetchJson(`https://api.map.baidu.com${path}?${params}`) as {
       status?: number; message?: string; results?: BaiduRow[]
     }
     if (data.status !== 0 || !Array.isArray(data.results)) {
@@ -140,6 +143,13 @@ export class BaiduProvider implements PlaceSearchProvider {
       }]
     }).slice(0, query.limit)
   }
+}
+
+/** Baidu signs the encoded path and ordered query, with SK appended before hashing. */
+export function baiduSignature(path: string, params: URLSearchParams, securityKey: string): string {
+  return createHash('md5')
+    .update(encodeURIComponent(`${path}?${params.toString()}${securityKey}`))
+    .digest('hex')
 }
 
 interface GoogleRow {

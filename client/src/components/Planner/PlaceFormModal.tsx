@@ -90,6 +90,7 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
   const [form, setForm] = useState(DEFAULT_FORM)
   const [mapsSearch, setMapsSearch] = useState('')
   const [mapsResults, setMapsResults] = useState([])
+  const [searchSource, setSearchSource] = useState<'baidu' | 'google' | 'osm' | null>(null)
   const [isSearchingMaps, setIsSearchingMaps] = useState(false)
   const [newCategoryName, setNewCategoryName] = useState('')
   const [showNewCategory, setShowNewCategory] = useState(false)
@@ -176,6 +177,7 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
     )
     setPendingFiles([])
     setDuplicateWarning(null)
+    setSearchSource(null)
     // The column follows whatever the dialog was opened with, not only a search
     // pick: a POI tapped on the map and a right-click place arrive as
     // prefillCoords, and editing an existing place arrives as `place`. Without
@@ -319,7 +321,11 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
       }
       const result = await mapsApi.search(mapsSearch, language, locationBias)
       setMapsResults(result.places || [])
+      setSearchSource(STANDALONE_MODE && ['baidu', 'google', 'osm'].includes(result.source)
+        ? result.source as 'baidu' | 'google' | 'osm'
+        : null)
     } catch (err: unknown) {
+      setSearchSource(null)
       toast.error(getApiErrorMessage(err, t('places.mapsSearchError')))
     } finally {
       setIsSearchingMaps(false)
@@ -539,6 +545,8 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
     mapsSearch,
     setMapsSearch,
     mapsResults,
+    searchSource,
+    setSearchSource,
     setMapsResults,
     isSearchingMaps,
     setIsSearchingMaps,
@@ -611,6 +619,8 @@ export default function PlaceFormModal(props: PlaceFormModalProps) {
     mapsSearch,
     setMapsSearch,
     mapsResults,
+    searchSource,
+    setSearchSource,
     setMapsResults,
     isSearchingMaps,
     setIsSearchingMaps,
@@ -716,7 +726,12 @@ export default function PlaceFormModal(props: PlaceFormModalProps) {
       <form onSubmit={handleSubmit} className={twoColumn || showDetails ? 'flex-1 min-w-0 space-y-3' : 'space-y-3'} onPaste={handlePaste}>
         {/* Place Search */}
         <div className="bg-surface-secondary rounded-xl p-3 border border-edge">
-          {!hasMapsKey && (
+          {STANDALONE_MODE && searchSource && (
+            <p className="mb-2 text-xs text-content-faint">
+              {t('places.searchSource', { source: searchSource === 'osm' ? 'OpenStreetMap' : searchSource === 'baidu' ? 'Baidu' : 'Google Places' })}
+            </p>
+          )}
+          {!STANDALONE_MODE && !hasMapsKey && (
             <p className="mb-2 text-xs text-content-faint">
               {t('places.osmActive')}
             </p>
@@ -727,7 +742,7 @@ export default function PlaceFormModal(props: PlaceFormModalProps) {
                 ref={searchInputRef}
                 type="text"
                 value={mapsSearch}
-                onChange={e => setMapsSearch(e.target.value)}
+                onChange={e => { setMapsSearch(e.target.value); setSearchSource(null) }}
                 onKeyDown={handleSearchKeyDown}
                 onBlur={() => setTimeout(() => setAcSuggestions([]), 150)}
                 onFocus={() => {
