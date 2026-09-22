@@ -2033,6 +2033,19 @@ describe('useTripPlanner — misc state', () => {
     await waitFor(() => expect(result.current.tripMembers).toHaveLength(3))
   })
 
+  it('skips the planner roster refresh after a local-only sync', async () => {
+    seedTrip()
+    await renderPlanner()
+    await waitFor(() => expect(tripsApi.getMembers).toHaveBeenCalled())
+    vi.mocked(tripsApi.getMembers).mockClear()
+
+    act(() => window.dispatchEvent(new CustomEvent('travel-sync-complete', { detail: { pulled: 0 } })))
+    expect(tripsApi.getMembers).not.toHaveBeenCalled()
+
+    act(() => window.dispatchEvent(new CustomEvent('travel-sync-complete', { detail: { pulled: 1 } })))
+    await waitFor(() => expect(tripsApi.getMembers).toHaveBeenCalledTimes(1))
+  })
+
   it('FE-TP-HOOK-103: a rejected roster fetch leaves the list untouched', async () => {
     vi.mocked(tripsApi.getMembers).mockRejectedValue(new Error('403'))
     seedTrip()

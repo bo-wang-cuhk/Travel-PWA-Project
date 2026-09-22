@@ -441,7 +441,10 @@ export function useTripPlanner() {
     return () => window.removeEventListener('accommodations:refresh', onRefresh)
   }, [refreshAccommodations])
   useEffect(() => {
-    const onSyncComplete = () => {
+    const onSyncComplete = (event: Event) => {
+      // A local push has already updated this page; refreshing the member list
+      // after every edit produces an unrelated second planner render.
+      if ((event as CustomEvent<{ pulled?: number }>).detail?.pulled === 0) return
       refreshMembers()
     }
     window.addEventListener('travel-sync-complete', onSyncComplete)

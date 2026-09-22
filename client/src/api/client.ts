@@ -835,7 +835,9 @@ export const pluginsApi = {
   // Host-rendered columns/actions plugins add into a native planner view via the
   // tableContributor hook. Fetched once per view, keyed by entityId; fail-safe.
   viewContributions: (view: 'reservations' | 'transports' | 'places' | 'day' | 'costs' | 'packing' | 'files' | 'todos', tripId: number | string) =>
-    apiClient.get(`/view-contributions/${view}/${tripId}`).then(r => r.data as { contributions: ViewContribution[] }),
+    STANDALONE_MODE
+      ? Promise.resolve({ contributions: [] as ViewContribution[] })
+      : apiClient.get(`/view-contributions/${view}/${tripId}`).then(r => r.data as { contributions: ViewContribution[] }),
   // Bounded markers plugins overlay on the trip map via the mapMarkerProvider hook
   // (#587). Host-normalized + range-checked; fail-safe (skips slow/failing providers).
   mapMarkers: (tripId: number | string) =>
@@ -1149,9 +1151,15 @@ export const healthApi = {
 export const weatherApi = {
   // `time` (HH:MM) makes a past date answer for that hour instead of the day (#1614).
   // `lang` localizes the description; when omitted the server keeps its own default (#2167).
-  get: (lat: number, lng: number, date: string, lang?: string, time?: string): Promise<WeatherResult> => apiClient.get('/weather', { params: { lat, lng, date, lang, time } }).then(r => parseInDev(weatherResultSchema, r.data, 'weather.get')),
-  getCurrent: (lat: number, lng: number, lang?: string): Promise<WeatherResult> => apiClient.get('/weather', { params: { lat, lng, lang } }).then(r => parseInDev(weatherResultSchema, r.data, 'weather.getCurrent')),
-  getDetailed: (lat: number, lng: number, date: string, lang?: string): Promise<WeatherResult> => apiClient.get('/weather/detailed', { params: { lat, lng, date, lang } }).then(r => parseInDev(weatherResultSchema, r.data, 'weather.getDetailed')),
+  get: (lat: number, lng: number, date: string, lang?: string, time?: string): Promise<WeatherResult> => STANDALONE_MODE
+    ? Promise.resolve({ temp: 0, main: '', description: '', type: '', error: 'no_forecast' })
+    : apiClient.get('/weather', { params: { lat, lng, date, lang, time } }).then(r => parseInDev(weatherResultSchema, r.data, 'weather.get')),
+  getCurrent: (lat: number, lng: number, lang?: string): Promise<WeatherResult> => STANDALONE_MODE
+    ? Promise.resolve({ temp: 0, main: '', description: '', type: '', error: 'no_forecast' })
+    : apiClient.get('/weather', { params: { lat, lng, lang } }).then(r => parseInDev(weatherResultSchema, r.data, 'weather.getCurrent')),
+  getDetailed: (lat: number, lng: number, date: string, lang?: string): Promise<WeatherResult> => STANDALONE_MODE
+    ? Promise.resolve({ temp: 0, main: '', description: '', type: '', error: 'no_forecast' })
+    : apiClient.get('/weather/detailed', { params: { lat, lng, date, lang } }).then(r => parseInDev(weatherResultSchema, r.data, 'weather.getDetailed')),
 }
 
 export const configApi = {

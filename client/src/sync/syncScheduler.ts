@@ -12,6 +12,8 @@ let running: Promise<ConfiguredSyncResult> | null = null
 let timer: ReturnType<typeof setTimeout> | null = null
 let registered = false
 let rerunRequested = false
+let pendingRealtimeCursor = 0
+let lastSyncedCursor = 0
 let realtimeChannel: RealtimeChannel | null = null
 let realtimeWorkspaceId: string | null = null
 let authSubscription: { unsubscribe(): void } | null = null
@@ -20,6 +22,25 @@ function stopRealtime(): void {
   if (realtimeChannel) void getSupabaseClient().removeChannel(realtimeChannel)
   realtimeChannel = null
   realtimeWorkspaceId = null
+  pendingRealtimeCursor = 0
+  lastSyncedCursor = 0
+}
+
+function cursorNumber(value: unknown): number | null {
+  const cursor = Number(value)
+  return Number.isSafeInteger(cursor) && cursor > 0 ? cursor : null
+}
+
+function onRealtimeChange(payload: { new?: { cursor?: unknown } }): void {
+  const cursor = cursorNumber(payload.new?.cursor)
+  if (cursor !== null && cursor <= lastSyncedCursor) return
+  if (running) {
+    // The active pull may already include this change. Decide whether another
+    // pass is needed only after its returned cursor is known.
+    pendingRealtimeCursor = Math.max(pendingRealtimeCursor, cursor ?? Number.MAX_SAFE_INTEGER)
+    return
+  }
+  scheduleSync(100)
 }
 
 async function ensureRealtime(): Promise<void> {
@@ -34,7 +55,7 @@ async function ensureRealtime(): Promise<void> {
     .channel(`workspace-sync-${data}`)
     .on('postgres_changes', {
       event: 'INSERT', schema: 'public', table: 'sync_changes', filter: `workspace_id=eq.${data}`,
-    }, () => scheduleSync(100))
+    }, onRealtimeChange)
     .subscribe(status => {
       if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') scheduleSync(1_000)
     })
@@ -52,11 +73,12 @@ async function runConfiguredSync(): Promise<ConfiguredSyncResult> {
   try {
     const result = await new SyncManager(new SupabaseSyncProvider()).sync()
     await ensureRealtime()
+    lastSyncedCursor = cursorNumber(result.cursor) ?? lastSyncedCursor
     const activeTripId = useTripStore.getState().trip?.id
     // Local mutations already update the visible store. Only pulled changes
     // need reconciliation, and hydration avoids resetTrip/isLoading.
     if (activeTripId != null && result.pulled > 0) await useTripStore.getState().hydrateActiveTrip(activeTripId)
-    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('travel-sync-complete'))
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('travel-sync-complete', { detail: { pulled: result.pulled } }))
     return { status: 'done', result }
   } finally {
     announce()
@@ -70,7 +92,9 @@ export function syncNow(): Promise<ConfiguredSyncResult> {
   }
   running = runConfiguredSync().finally(() => {
     running = null
-    if (rerunRequested) {
+    const needsRealtimeRerun = pendingRealtimeCursor > lastSyncedCursor
+    pendingRealtimeCursor = 0
+    if (rerunRequested || needsRealtimeRerun) {
       rerunRequested = false
       scheduleSync(100)
     }
