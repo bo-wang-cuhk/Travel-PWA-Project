@@ -163,7 +163,13 @@ export default function MPlaceEditSheet({ planner, onOpenExpense }: MPlaceEditSh
     const avgLatRad = ((minLat + maxLat) / 2) * (Math.PI / 180)
     const diagKm = Math.sqrt(((maxLat - minLat) * 111) ** 2 + ((maxLng - minLng) * 111 * Math.cos(avgLatRad)) ** 2)
     if (diagKm > 500) return undefined
-    return { low: { lat: minLat, lng: minLng }, high: { lat: maxLat, lng: maxLng } }
+    // Nominatim rejects a zero-area viewbox (common with one saved place).
+    const latPad = minLat === maxLat ? 0.05 : 0
+    const lngPad = minLng === maxLng ? 0.05 : 0
+    return {
+      low: { lat: Math.max(-90, minLat - latPad), lng: Math.max(-180, minLng - lngPad) },
+      high: { lat: Math.min(90, maxLat + latPad), lng: Math.min(180, maxLng + lngPad) },
+    }
   }, [places])
 
   const handleChange = (field: keyof PlaceFormData, value: string) => {

@@ -238,7 +238,13 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
     const diagKm = Math.sqrt((dlat * 111) ** 2 + (dlng * 111 * Math.cos(avgLatRad)) ** 2)
     if (diagKm > 500) return undefined
 
-    return { low: { lat: minLat, lng: minLng }, high: { lat: maxLat, lng: maxLng } }
+    // Nominatim rejects a zero-area viewbox (common with one saved place).
+    const latPad = minLat === maxLat ? 0.05 : 0
+    const lngPad = minLng === maxLng ? 0.05 : 0
+    return {
+      low: { lat: Math.max(-90, minLat - latPad), lng: Math.max(-180, minLng - lngPad) },
+      high: { lat: Math.min(90, maxLat + latPad), lng: Math.min(180, maxLng + lngPad) },
+    }
   }, [places])
 
   // Autocomplete fetch — aborts any in-flight request before starting a new one

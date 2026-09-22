@@ -72,7 +72,8 @@ Most of what follows is an addon an admin switches on or off. Lists, Costs, Docu
 
 - **Day plans**: drag places between days and reorder inside a day, with undo. Notes and bookings drag the same way, and a map marker drops straight onto a day
 - **Maps**: Leaflet, Mapbox GL or MapLibre GL (OpenFreeMap, no token), with clustering, photo markers and route lines. 3D buildings and terrain are Mapbox only
-- **Place search**: Google Places when a key is set (photos, ratings, opening hours), otherwise OpenStreetMap with no key
+- **Place search (standalone PWA)**: Supabase `place-search` tries Baidu (`BAIDU_MAPS_AK`), then Google Places (`GOOGLE_PLACES_API_KEY`), then OpenStreetMap. Set the keys as Supabase Edge Function secrets; missing keys skip that provider. Search returns `name`, `address`, WGS84 `latitude`/`longitude`, `source`, and `externalPlaceId`. Provider request counts and last errors are logged per warm Edge isolate; no quota database is required.
+  Deploy with `supabase functions deploy place-search --project-ref yxkrnimvjrppmoxfxeyg` after setting `BAIDU_MAPS_AK` and `GOOGLE_PLACES_API_KEY` as Supabase secrets. The OSM fallback works without either key, but the public Nominatim endpoint allows at most one request per second across the entire application. The function spaces requests within one warm Edge isolate; multiple isolates or users can still exceed the public limit.
 - **Place enrichment**: descriptions, facts, hours and photo candidates from OpenStreetMap, Wikipedia, Wikidata and Wikimedia Commons
 - **POI explore**: pull OpenStreetMap POIs by category for the current viewport over Overpass
 - **Import**: shared Google Maps and Naver Maps lists, plus GPX, KML and KMZ files

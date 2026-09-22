@@ -1,10 +1,11 @@
 import { corsHeaders, json } from '../_shared/http.ts'
+import { BaiduProvider, GoogleProvider, OSMProvider, searchWithFallback } from './providers.ts'
+import { osmRequest } from './osmRequest.ts'
 
 const NOMINATIM_URL = Deno.env.get('PLACE_SEARCH_BASE_URL')?.replace(/\/$/, '')
   || 'https://nominatim.openstreetmap.org'
 const APP_USER_AGENT = Deno.env.get('PLACE_SEARCH_USER_AGENT')
   || 'Roamune-Travel-PWA/1.0 (https://github.com/bo-wang-cuhk/Travel-PWA-Project)'
-let nextProviderRequestAt = 0
 
 interface SearchBody {
   action?: 'search' | 'reverse' | 'resolve-url'
@@ -74,26 +75,11 @@ function normalize(row: NominatimResult) {
 }
 
 async function nominatim(path: string, params: URLSearchParams, lang?: string): Promise<unknown> {
-  // Public Nominatim permits at most one request per second per application.
-  // This serialises requests handled by the same warm Edge isolate; the client
-  // cache prevents ordinary repeated searches from reaching this point at all.
-  const waitMs = Math.max(0, nextProviderRequestAt - Date.now())
-  nextProviderRequestAt = Math.max(nextProviderRequestAt, Date.now()) + 1_050
-  if (waitMs) await new Promise(resolve => setTimeout(resolve, waitMs))
   params.set('format', 'jsonv2')
   params.set('addressdetails', '1')
   params.set('extratags', '1')
   params.set('namedetails', '1')
-  const response = await fetch(`${NOMINATIM_URL}${path}?${params}`, {
-    headers: {
-      'Accept': 'application/json',
-      'Accept-Language': lang || 'zh-CN,zh;q=0.9,en;q=0.7',
-      'User-Agent': APP_USER_AGENT,
-    },
-    signal: AbortSignal.timeout(8_000),
-  })
-  if (!response.ok) throw new Error(`Place provider returned ${response.status}`)
-  return response.json()
+  return osmRequest(`${NOMINATIM_URL}${path}?${params}`, lang, APP_USER_AGENT)
 }
 
 function parseGoogleCoordinates(input: string): { lat: number; lng: number } | null {
@@ -142,14 +128,18 @@ Deno.serve(async (req: Request) => {
     if (action === 'search') {
       const q = body.q?.trim()
       if (!q || q.length > 200) return json({ error: 'Invalid search query' }, 400)
-      const params = new URLSearchParams({ q, limit: String(clampLimit(body.limit)) })
       const bounds = body.bounds
-      if (bounds) {
-        const values = [bounds.low.lng, bounds.high.lat, bounds.high.lng, bounds.low.lat]
-        if (values.every(value => finite(value) !== null)) params.set('viewbox', values.join(','))
+      if (bounds && ![bounds.low?.lat, bounds.low?.lng, bounds.high?.lat, bounds.high?.lng]
+        .every(value => typeof value === 'number' && Number.isFinite(value))) {
+        return json({ error: 'Invalid bounds' }, 400)
       }
-      const raw = await nominatim('/search', params, body.lang) as NominatimResult[]
-      return json({ places: raw.map(normalize).filter(Boolean), source: 'nominatim' })
+      const providers = []
+      const baiduKey = Deno.env.get('BAIDU_MAPS_AK')
+      const googleKey = Deno.env.get('GOOGLE_PLACES_API_KEY')
+      if (baiduKey) providers.push(new BaiduProvider(baiduKey))
+      if (googleKey) providers.push(new GoogleProvider(googleKey))
+      providers.push(new OSMProvider(NOMINATIM_URL, APP_USER_AGENT))
+      return json(await searchWithFallback({ q, lang: body.lang, limit: clampLimit(body.limit), bounds }, providers))
     }
 
     if (action === 'reverse') {

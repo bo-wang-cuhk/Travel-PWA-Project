@@ -5,6 +5,7 @@ import { http, HttpResponse } from 'msw';
 import { server } from '../../../tests/helpers/msw/server';
 import { useAuthStore } from '../../store/authStore';
 import { useTripStore } from '../../store/tripStore';
+import { useSettingsStore } from '../../store/settingsStore';
 import { useAddonStore } from '../../store/addonStore';
 import { usePermissionsStore } from '../../store/permissionsStore';
 import { resetAllStores, seedStore } from '../../../tests/helpers/store';
@@ -39,6 +40,7 @@ const defaultProps = {
 
 beforeEach(() => {
   resetAllStores();
+  useSettingsStore.setState(state => ({ settings: { ...state.settings, language: 'en' } }));
   seedStore(useAuthStore, { user: buildUser(), isAuthenticated: true, hasMapsKey: false });
   seedStore(useTripStore, { trip: buildTrip({ id: 1 }) });
 });
@@ -707,6 +709,29 @@ describe('PlaceFormModal', () => {
       low: { lat: 48.85, lng: 2.34 },
       high: { lat: 48.87, lng: 2.37 },
     });
+  });
+
+  it('a trip with one place sends a nonzero search box', async () => {
+    const user = userEvent.setup();
+    const bodies: Record<string, unknown>[] = [];
+    server.use(http.post('/api/maps/autocomplete', async ({ request }) => {
+      bodies.push((await request.json()) as Record<string, unknown>);
+      return HttpResponse.json({ suggestions: [], source: 'nominatim' });
+    }));
+    seedStore(useTripStore, {
+      trip: buildTrip({ id: 1 }),
+      places: [buildPlace({ lat: 30.638, lng: 119.682 })],
+    });
+
+    render(<PlaceFormModal {...defaultProps} />);
+    await user.type(screen.getByPlaceholderText(/Search places|搜索地点/), '故宫');
+
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    const bounds = bodies[0].locationBias as { low: { lat: number; lng: number }; high: { lat: number; lng: number } };
+    expect(bounds.low.lat).toBeCloseTo(30.588);
+    expect(bounds.low.lng).toBeCloseTo(119.632);
+    expect(bounds.high.lat).toBeCloseTo(30.688);
+    expect(bounds.high.lng).toBeCloseTo(119.732);
   });
 
   it('FE-PLANNER-PLACEFORM-043: places spread over more than 500 km send no location bias', async () => {
