@@ -52,9 +52,11 @@ async function runConfiguredSync(): Promise<ConfiguredSyncResult> {
   try {
     const result = await new SyncManager(new SupabaseSyncProvider()).sync()
     await ensureRealtime()
-    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('travel-sync-complete'))
     const activeTripId = useTripStore.getState().trip?.id
-    if (activeTripId != null) void useTripStore.getState().loadTrip(activeTripId).catch(console.error)
+    // Local mutations already update the visible store. Only pulled changes
+    // need reconciliation, and hydration avoids resetTrip/isLoading.
+    if (activeTripId != null && result.pulled > 0) await useTripStore.getState().hydrateActiveTrip(activeTripId)
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('travel-sync-complete'))
     return { status: 'done', result }
   } finally {
     announce()

@@ -185,9 +185,11 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
   // best-effort; a failure on one must not wipe the others.
   hydrateActiveTrip: async (tripId: number | string) => {
     await Promise.all([
+      tripRepo.get(tripId).then(d => set(state =>
+        state.trip?.id === Number(tripId) ? { trip: d.trip } : state
+      )).catch(() => {}),
       get().refreshDays(tripId),
       placeRepo.list(tripId).then(d => set({ places: d.places })).catch(() => {}),
-      assignmentRepo.listByTrip(tripId).then(assignments => set({ assignments })).catch(() => {}),
       packingRepo.list(tripId).then(d => set({ packingItems: d.items })).catch(() => {}),
       todoRepo.list(tripId).then(d => set({ todoItems: d.items })).catch(() => {}),
       get().loadBudgetItems(tripId),

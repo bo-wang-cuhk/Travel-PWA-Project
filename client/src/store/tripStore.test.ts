@@ -327,6 +327,7 @@ describe('tripStore', () => {
       window.removeEventListener('accommodations:refresh', nudged);
 
       const state = useTripStore.getState();
+      expect(state.trip?.title).toBe('Paris');
       expect(state.days.map(d => d.id)).toEqual([1, 2]);
       expect(state.places.map(p => p.id)).toEqual([501]);
       expect(state.packingItems.map(i => i.id)).toEqual([61]);
@@ -334,7 +335,7 @@ describe('tripStore', () => {
       expect(state.budgetItems.map(i => i.id)).toEqual([81]);
       expect(state.reservations.map(r => r.id)).toEqual([91]);
       expect(state.files.map(f => f.id)).toEqual([96]);
-      // The trip itself is not re-fetched — no splash, no resetTrip.
+      // The trip refreshes without a splash or resetTrip.
       expect(state.isLoading).toBe(false);
       expect(nudged).toHaveBeenCalledTimes(1);
     });

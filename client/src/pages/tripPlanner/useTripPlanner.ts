@@ -106,12 +106,18 @@ export function useTripPlanner() {
     request.then(d => setTripMembers(d.members as TripMember[])).catch(() => {})
   }, [tripId])
 
-  const loadAccommodations = useCallback(() => {
+  const refreshAccommodations = useCallback(() => {
     if (tripId) {
       accommodationRepo.list(tripId).then(d => setTripAccommodations(d.accommodations || [])).catch(() => {})
-      tripActions.loadReservations(tripId)
     }
   }, [tripId])
+
+  const loadAccommodations = useCallback(() => {
+    if (tripId) {
+      refreshAccommodations()
+      tripActions.loadReservations(tripId)
+    }
+  }, [tripId, refreshAccommodations])
 
   useEffect(() => {
     if (STANDALONE_MODE) {
@@ -430,18 +436,17 @@ export function useTripPlanner() {
   // Accommodations live in this hook's local state, so store-level refreshes
   // (remote trip date change, reconnect hydration) nudge us via this event (#1288).
   useEffect(() => {
-    const onRefresh = () => loadAccommodations()
+    const onRefresh = () => refreshAccommodations()
     window.addEventListener('accommodations:refresh', onRefresh)
     return () => window.removeEventListener('accommodations:refresh', onRefresh)
-  }, [loadAccommodations])
+  }, [refreshAccommodations])
   useEffect(() => {
     const onSyncComplete = () => {
-      loadAccommodations()
       refreshMembers()
     }
     window.addEventListener('travel-sync-complete', onSyncComplete)
     return () => window.removeEventListener('travel-sync-complete', onSyncComplete)
-  }, [loadAccommodations, refreshMembers])
+  }, [refreshMembers])
 
   useTripWebSocket(tripId)
 
