@@ -9,7 +9,7 @@ describe('place-search fallback', () => {
   it('matches Baidu documented SN signature and signs requests when SK is configured', async () => {
     expect(baiduSignature('/geocoder/v2/', new URLSearchParams('address=%E7%99%BE%E5%BA%A6%E5%A4%A7%E5%8E%A6&output=json&ak=yourak'), 'yoursk'))
       .toBe('7de5a22212ffaa9e326444c75a58f9a0')
-    const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ status: 0, results: [] }) })
+    const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ status: 0, result: [] }) })
     vi.stubGlobal('fetch', fetch)
     await new BaiduProvider('ak', 'sk').search(query)
     expect(new URL(fetch.mock.calls[0][0]).searchParams.get('sn')).toMatch(/^[a-f0-9]{32}$/)
@@ -17,7 +17,7 @@ describe('place-search fallback', () => {
 
   it('uses Baidu first and converts its coordinates to WGS84', async () => {
     const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({
-      status: 0, results: [{ uid: 'bd-1', name: '故宫博物院', address: '景山前街4号',
+      status: 0, result: [{ uid: 'bd-1', name: '故宫博物院', address: '景山前街4号',
         location: { lat: 39.9171, lng: 116.4035 } }],
     }) })
     vi.stubGlobal('fetch', fetch)

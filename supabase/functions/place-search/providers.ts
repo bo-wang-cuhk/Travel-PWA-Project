@@ -128,12 +128,13 @@ export class BaiduProvider implements PlaceSearchProvider {
     const path = '/place/v2/suggestion'
     if (this.securityKey) params.set('sn', baiduSignature(path, params, this.securityKey))
     const data = await fetchJson(`https://api.map.baidu.com${path}?${params}`) as {
-      status?: number; message?: string; results?: BaiduRow[]
+      status?: number; message?: string; result?: BaiduRow[]
     }
-    if (data.status !== 0 || !Array.isArray(data.results)) {
+    if (data.status !== 0) {
       throw new Error(`Baidu status ${data.status ?? 'invalid response'}: ${data.message ?? ''}`)
     }
-    return data.results.flatMap((row): PlaceSearchResult[] => {
+    if (!Array.isArray(data.result)) throw new Error('Invalid Baidu suggestion response')
+    return data.result.flatMap((row): PlaceSearchResult[] => {
       const point = validPoint(row.location?.lat, row.location?.lng)
       if (!point || !row.name) return []
       return [{
