@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import { tagsApi, categoriesApi } from '../api/client'
+import { categoryRepo } from '../repo/categoryRepo'
+import { STANDALONE_MODE } from '../config/runtimeMode'
 import { offlineDb } from '../db/offlineDb'
 import { tripRepo } from '../repo/tripRepo'
 import { dayRepo } from '../repo/dayRepo'
@@ -146,9 +148,9 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         isEffectivelyOnline()
           ? tagsApi.list().catch(() => offlineDb.tags.toArray().then(tags => ({ tags })))
           : offlineDb.tags.toArray().then(tags => ({ tags })),
-        isEffectivelyOnline()
+        !STANDALONE_MODE && isEffectivelyOnline()
           ? categoriesApi.list().catch(() => offlineDb.categories.toArray().then(categories => ({ categories })))
-          : offlineDb.categories.toArray().then(categories => ({ categories })),
+          : categoryRepo.list(),
       ])
 
       const dayNotesMap: DayNotesMap = {}
@@ -238,7 +240,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
 
   addCategory: async (data: Partial<Category> & { name: string }) => {
     try {
-      const result = await categoriesApi.create(data)
+      const result = STANDALONE_MODE ? await categoryRepo.create(data) : await categoriesApi.create(data)
       set((state) => ({ categories: [...state.categories, result.category] }))
       return result.category
     } catch (err: unknown) {

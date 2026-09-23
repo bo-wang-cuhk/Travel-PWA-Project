@@ -421,13 +421,14 @@ export default function App() {
   // interceptor's covers all of /public/. A route that is public to one and not
   // to the other is exactly the seam that puts a 401 back.
   const hideAuthedWidgets = STANDALONE_MODE || isAuthPage || isAuthPublicPath(location.pathname)
+  const hideSaveToCollection = isAuthPage || isAuthPublicPath(location.pathname)
 
   return (
     <TranslationProvider>
       {!hideAuthedWidgets && <ErrorBoundary boundaryId="widget:system-notice" fallback={null}><SystemNoticeHost /></ErrorBoundary>}
       <ErrorBoundary boundaryId="widget:toast" fallback={null}><ToastContainer /></ErrorBoundary>
       {!hideAuthedWidgets && <ErrorBoundary boundaryId="widget:background-tasks" fallback={null}><BackgroundTasksWidget /></ErrorBoundary>}
-      {!hideAuthedWidgets && (isPhone ? <MSaveToCollectionSheet /> : <SaveToCollectionModal />)}
+      {!hideSaveToCollection && (isPhone ? <MSaveToCollectionSheet /> : <SaveToCollectionModal />)}
       <ErrorBoundary boundaryId="widget:offline-banner" fallback={null}><OfflineBanner /></ErrorBoundary>
       {/* One boundary for all route chunks, above <Routes> so it stays mounted
           across navigations. react-router runs location updates inside a transition,

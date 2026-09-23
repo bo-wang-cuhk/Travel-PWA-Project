@@ -352,8 +352,8 @@ function BoardingPassHero({ trip, bundle, locale, onOpen, onEdit, onCopy, onArch
 
   const members = bundle?.members || []
   const places = bundle?.places || []
-  const buddyCount = trip.shared_count != null ? trip.shared_count + 1 : members.length
-  const placeCount = trip.place_count || places.length
+  const buddyCount = members.length || ((trip.shared_count ?? 0) + 1)
+  const placeCount = places.length > 0 ? places.length : (trip.place_count ?? 0)
 
   const badge = status === 'ongoing' ? t('dashboard.hero.badgeLive')
     : status === 'today' ? t('dashboard.hero.badgeToday')

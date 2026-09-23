@@ -4,13 +4,14 @@ import type { Place } from '../types'
 export interface LocalPlaceRecord extends Place {
   sync_id: string
   trip_sync_id: string
+  category_sync_id?: string | null
   created_at: string
   updated_at: string
   deleted_at: string | null
 }
 
 export type StoredPlaceRecord = Place & Partial<Pick<LocalPlaceRecord,
-  'sync_id' | 'trip_sync_id' | 'created_at' | 'updated_at' | 'deleted_at'
+  'sync_id' | 'trip_sync_id' | 'category_sync_id' | 'created_at' | 'updated_at' | 'deleted_at'
 >>
 
 /** Provider-neutral Place document. Server/account projections are omitted. */
@@ -43,6 +44,8 @@ export interface SyncedPlace {
   website: string | null
   phone: string | null
   transportMode: string | null
+  categoryId: string | null
+  ratings: NonNullable<Place['ratings']>
   createdAt: string
   updatedAt: string
   deletedAt: string | null
@@ -78,13 +81,15 @@ export function toSyncedPlace(place: LocalPlaceRecord): SyncedPlace {
     website: place.website ?? null,
     phone: place.phone ?? null,
     transportMode: place.transport_mode ?? null,
+    categoryId: place.category_sync_id ?? null,
+    ratings: place.ratings ?? [],
     createdAt: place.created_at,
     updatedAt: place.updated_at,
     deletedAt: place.deleted_at,
   }
 }
 
-export function applySyncedPlace(remote: SyncedPlace, localId: number, tripId: number): LocalPlaceRecord {
+export function applySyncedPlace(remote: SyncedPlace, localId: number, tripId: number, categoryId: number | null = null): LocalPlaceRecord {
   return {
     id: localId,
     sync_id: remote.id,
@@ -95,7 +100,8 @@ export function applySyncedPlace(remote: SyncedPlace, localId: number, tripId: n
     lat: remote.lat,
     lng: remote.lng,
     address: remote.address,
-    category_id: null,
+    category_id: categoryId,
+    category_sync_id: remote.categoryId,
     price: remote.price,
     currency: remote.currency,
     reservation_status: remote.reservationStatus,
@@ -116,6 +122,9 @@ export function applySyncedPlace(remote: SyncedPlace, localId: number, tripId: n
     website: remote.website,
     phone: remote.phone,
     transport_mode: remote.transportMode,
+    ratings: remote.ratings ?? [],
+    rating_avg: remote.ratings?.length ? remote.ratings.reduce((sum, vote) => sum + vote.rating, 0) / remote.ratings.length : null,
+    rating_count: remote.ratings?.length ?? 0,
     created_at: remote.createdAt,
     updated_at: remote.updatedAt,
     deleted_at: remote.deletedAt,

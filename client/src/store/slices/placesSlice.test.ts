@@ -38,12 +38,16 @@ describe('placesSlice', () => {
     expect(useTripStore.getState().assignments['3'][0].place.place_time).toBe('09:00')
   })
 
-  it('keeps collaborative ratings as an online-only enhancement', async () => {
-    const place = buildPlace({ id: 10, trip_id: 1 })
-    seedStore(useTripStore, { places: [place] })
-    vi.spyOn(placesApi, 'rate').mockResolvedValue({ place: { ...place, rating_avg: 5, rating_count: 1 } })
-    await useTripStore.getState().ratePlace(1, 10, 5)
-    expect(useTripStore.getState().places[0].rating_avg).toBe(5)
+  it('stores collaborative ratings locally and queues the place for sync', async () => {
+    const { trip, places: [place] } = await localFixture()
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    await useTripStore.getState().ratePlace(trip.id, place.id, 5)
+    const stored = await offlineDb.places.get(place.id)
+    expect(useTripStore.getState().places[0]).toMatchObject({ rating_avg: 5, rating_count: 1 })
+    expect(stored).toMatchObject({ rating_avg: 5, rating_count: 1 })
+    expect(stored?.ratings).toEqual([expect.objectContaining({ rating: 5 })])
+    expect(await offlineDb.syncOutbox.get(`place:${place.sync_id}`)).toMatchObject({ operation: 'upsert' })
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 
   it('creates and updates a Place through IndexedDB without fetch', async () => {

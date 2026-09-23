@@ -4,6 +4,7 @@ import type { Place } from '../types'
 import { randomId } from '../utils/randomId'
 import { STANDALONE_MODE } from '../config/runtimeMode'
 import { placeSearch } from '../services/placeSearch'
+import { categoryRepo } from '../repo/categoryRepo'
 import {
   weatherResultSchema, type WeatherResult,
   inAppListResultSchema, type InAppListResult,
@@ -535,10 +536,10 @@ export const tagsApi = {
 }
 
 export const categoriesApi = {
-  list: () => apiClient.get('/categories').then(r => r.data),
-  create: (data: CreateCategoryRequest) => apiClient.post('/categories', data).then(r => r.data),
-  update: (id: number, data: UpdateCategoryRequest) => apiClient.put(`/categories/${id}`, data).then(r => r.data),
-  delete: (id: number) => apiClient.delete(`/categories/${id}`).then(r => r.data),
+  list: () => STANDALONE_MODE ? categoryRepo.list() : apiClient.get('/categories').then(r => r.data),
+  create: (data: CreateCategoryRequest) => STANDALONE_MODE ? categoryRepo.create(data) : apiClient.post('/categories', data).then(r => r.data),
+  update: (id: number, data: UpdateCategoryRequest) => STANDALONE_MODE ? categoryRepo.update(id, data) : apiClient.put(`/categories/${id}`, data).then(r => r.data),
+  delete: (id: number) => STANDALONE_MODE ? categoryRepo.delete(id) : apiClient.delete(`/categories/${id}`).then(r => r.data),
 }
 
 export const adminApi = {

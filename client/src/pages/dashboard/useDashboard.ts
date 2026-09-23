@@ -128,7 +128,13 @@ export function useDashboard() {
   // real buddies and place thumbnails instead of placeholders.
   useEffect(() => {
     if (!spotlight) { setHeroBundle(null); return }
-    if (STANDALONE_MODE) { setHeroBundle({ members: [], places: [] }); return }
+    if (STANDALONE_MODE) {
+      let cancelled = false
+      tripRepo.dashboardBundle(spotlight.id)
+        .then((bundle) => { if (!cancelled) setHeroBundle(bundle) })
+        .catch(() => { if (!cancelled) setHeroBundle(null) })
+      return () => { cancelled = true }
+    }
     let cancelled = false
     tripsApi.bundle(spotlight.id)
       .then((b: HeroBundle) => { if (!cancelled) setHeroBundle({ members: b.members || [], places: b.places || [] }) })

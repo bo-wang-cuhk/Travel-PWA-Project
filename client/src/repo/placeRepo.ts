@@ -6,6 +6,25 @@ import { markLocalChange } from '../sync/localChangeRepository'
 import type { Place } from '../types'
 import { randomId } from '../utils/randomId'
 
+function currentRatingUser(): { id: number; username: string; avatar: string | null } {
+  try {
+    const raw = localStorage.getItem('trek_auth_snapshot')
+    const user = raw ? JSON.parse(raw)?.state?.user : null
+    return { id: Number(user?.id ?? 0), username: String(user?.display_name || user?.username || '旅行者'), avatar: user?.avatar_url ?? null }
+  } catch { return { id: 0, username: '旅行者', avatar: null } }
+}
+
+async function categoryFields(categoryId: unknown): Promise<{ category_id: number | null; category_sync_id: string | null; category: Place['category'] }> {
+  if (categoryId == null || categoryId === '') return { category_id: null, category_sync_id: null, category: null }
+  const category = await offlineDb.categories.get(Number(categoryId))
+  if (!category || category.deleted_at) return { category_id: null, category_sync_id: null, category: null }
+  return {
+    category_id: category.id,
+    category_sync_id: category.sync_id || null,
+    category: { id: category.id, name: category.name, color: category.color, icon: category.icon },
+  }
+}
+
 async function nextLocalPlaceId(): Promise<number> {
   const first = await offlineDb.places.orderBy('id').first()
   return first && first.id < 0 ? first.id - 1 : -1
@@ -41,10 +60,11 @@ export const placeRepo = {
 
   async create(tripId: number | string, data: Record<string, unknown> & { name: string }): Promise<{ place: LocalPlaceRecord }> {
     const localTripId = Number(tripId)
-    return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.places, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
+    return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.places, offlineDb.categories, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
       const trip = await offlineDb.trips.get(localTripId)
       if (!trip || trip.deleted_at || !trip.sync_id) throw new Error('Trip not found in local database')
       const now = new Date().toISOString()
+      const category = await categoryFields(data.category_id)
       const place: LocalPlaceRecord = {
         ...(data as Partial<Place>),
         id: await nextLocalPlaceId(),
@@ -52,6 +72,7 @@ export const placeRepo = {
         trip_id: localTripId,
         trip_sync_id: trip.sync_id,
         name: data.name,
+        ...category,
         created_at: now,
         updated_at: now,
         deleted_at: null,
@@ -64,11 +85,34 @@ export const placeRepo = {
 
   async update(tripId: number | string, id: number | string, data: Record<string, unknown>): Promise<{ place: LocalPlaceRecord }> {
     const localTripId = Number(tripId)
+    return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.places, offlineDb.categories, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
+      const [trip, stored] = await Promise.all([offlineDb.trips.get(localTripId), offlineDb.places.get(Number(id))])
+      if (!trip || trip.deleted_at || !trip.sync_id) throw new Error('Trip not found in local database')
+      if (!stored || stored.deleted_at || stored.trip_id !== localTripId) throw new Error('Place not found in local database')
+      const category = Object.prototype.hasOwnProperty.call(data, 'category_id') ? await categoryFields(data.category_id) : {}
+      const place = { ...asLocalPlace(stored, trip.sync_id), ...(data as Partial<Place>), ...category, updated_at: new Date().toISOString() }
+      await offlineDb.places.put(place)
+      await markLocalChange('place', place.sync_id, 'upsert')
+      return { place }
+    })
+  },
+
+  async rate(tripId: number | string, id: number | string, rating: number | null): Promise<{ place: LocalPlaceRecord }> {
+    const localTripId = Number(tripId)
     return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.places, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
       const [trip, stored] = await Promise.all([offlineDb.trips.get(localTripId), offlineDb.places.get(Number(id))])
       if (!trip || trip.deleted_at || !trip.sync_id) throw new Error('Trip not found in local database')
       if (!stored || stored.deleted_at || stored.trip_id !== localTripId) throw new Error('Place not found in local database')
-      const place = { ...asLocalPlace(stored, trip.sync_id), ...(data as Partial<Place>), updated_at: new Date().toISOString() }
+      const user = currentRatingUser()
+      const votes = (stored.ratings ?? []).filter(vote => vote.user_id !== user.id)
+      if (rating != null) votes.push({ user_id: user.id, username: user.username, avatar: user.avatar, rating })
+      const place: LocalPlaceRecord = {
+        ...asLocalPlace(stored, trip.sync_id),
+        ratings: votes,
+        rating_avg: votes.length ? votes.reduce((sum, vote) => sum + vote.rating, 0) / votes.length : null,
+        rating_count: votes.length,
+        updated_at: new Date().toISOString(),
+      }
       await offlineDb.places.put(place)
       await markLocalChange('place', place.sync_id, 'upsert')
       return { place }

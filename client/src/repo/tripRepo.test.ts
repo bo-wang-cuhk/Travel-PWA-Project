@@ -142,4 +142,24 @@ describe('tripRepo local IndexedDB data source', () => {
     expect(all.filter(day => day.deleted_at)).toHaveLength(1)
     expect((await offlineDb.trips.get(trip.id))?.day_count).toBe(2)
   })
+
+  it('derives dashboard place and companion counts from active local records', async () => {
+    const trip = buildTrip({ id: 41, user_id: 7, place_count: 0, shared_count: 0 })
+    await offlineDb.trips.put(trip)
+    await offlineDb.places.bulkPut([
+      { id: 1, trip_id: 41, name: 'Active place', deleted_at: null },
+      { id: 2, trip_id: 41, name: 'Deleted place', deleted_at: '2026-01-01T00:00:00.000Z' },
+    ])
+    await offlineDb.tripMembers.bulkPut([
+      { tripId: 41, id: 7, username: 'Owner', role: 'owner' },
+      { tripId: 41, id: 8, username: 'Friend', role: 'member' },
+    ])
+
+    const listed = (await tripRepo.list()).trips[0]
+    expect(listed).toMatchObject({ place_count: 1, shared_count: 1, owner_username: 'Owner' })
+
+    const bundle = await tripRepo.dashboardBundle(41)
+    expect(bundle.members.map(member => member.username)).toEqual(['Owner', 'Friend'])
+    expect(bundle.places.map(place => place.name)).toEqual(['Active place'])
+  })
 })

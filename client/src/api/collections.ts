@@ -24,6 +24,8 @@ import type {
   CollectionLabelCreateRequest,
   CollectionLabelUpdateRequest,
 } from '@trek/shared'
+import { STANDALONE_MODE } from '../config/runtimeMode'
+import { collectionRepo } from '../repo/collectionRepo'
 
 const ax = apiClient
 const base = '/addons/collections'
@@ -48,7 +50,7 @@ export interface CopyToTripResult {
  * uses `satisfies` on the request payloads so the shared Zod request types stay
  * the single source of truth.
  */
-export const collectionsApi = {
+const serverCollectionsApi = {
   list: (): Promise<CollectionListResponse> =>
     ax.get(base).then((r: AxiosResponse) => r.data),
   get: (id: number): Promise<CollectionDetailResponse> =>
@@ -128,3 +130,44 @@ export const collectionsApi = {
   unassignLabels: (labelIds: number[], placeIds: number[]): Promise<{ changed: number }> =>
     ax.post(`${base}/labels/unassign`, { label_ids: labelIds, place_ids: placeIds }).then((r: AxiosResponse) => r.data),
 }
+
+const unsupported = async (): Promise<never> => { throw new Error('This collection feature is not available yet') }
+
+const localCollectionsApi = {
+  list: () => collectionRepo.list(),
+  get: (id: number) => collectionRepo.get(id),
+  create: (body: CollectionCreateRequest) => collectionRepo.create(body),
+  update: (id: number, body: CollectionUpdateRequest) => collectionRepo.update(id, body),
+  uploadCover: unsupported,
+  remove: (id: number) => collectionRepo.remove(id),
+  reorder: (ids: number[]) => collectionRepo.reorder(ids),
+  savePlace: (body: CollectionSavePlaceRequest) => collectionRepo.savePlace(body),
+  saveFromTrip: (body: CollectionSaveFromTripRequest) => collectionRepo.saveFromTrip(body),
+  saveFromTripMany: (collectionId: number, tripId: number, placeIds: number[], force?: boolean) => collectionRepo.saveFromTripMany(collectionId, tripId, placeIds, force),
+  importable: (collectionId: number, tripId: number) => collectionRepo.importable(collectionId, tripId),
+  updatePlace: (id: number, body: CollectionPlaceUpdateRequest) => collectionRepo.updatePlace(id, body),
+  uploadPlaceImage: unsupported,
+  setStatus: (id: number, status: CollectionStatus) => collectionRepo.setStatus(id, status),
+  setStatusMany: (ids: number[], status: CollectionStatus) => collectionRepo.setStatusMany(ids, status),
+  setStatusFromTrip: (tripId: number, ids: number[], status: CollectionStatus) => collectionRepo.setStatusFromTrip(tripId, ids, status),
+  ratePlace: (id: number, rating: number | null) => collectionRepo.ratePlace(id, rating),
+  deletePlace: (id: number) => collectionRepo.deletePlace(id),
+  deleteMany: (ids: number[]) => collectionRepo.deleteMany(ids),
+  copyToTrip: (body: CollectionCopyToTripRequest) => collectionRepo.copyToTrip(body),
+  membership: (params: MembershipQuery) => collectionRepo.membership(params),
+  invite: unsupported,
+  setMemberRole: unsupported,
+  acceptInvite: unsupported,
+  declineInvite: unsupported,
+  cancelInvite: unsupported,
+  leave: unsupported,
+  removeMember: unsupported,
+  availableUsers: async () => ({ users: [] }),
+  createLabel: unsupported,
+  updateLabel: unsupported,
+  deleteLabel: unsupported,
+  assignLabels: unsupported,
+  unassignLabels: unsupported,
+}
+
+export const collectionsApi: typeof serverCollectionsApi = (STANDALONE_MODE ? localCollectionsApi : serverCollectionsApi) as typeof serverCollectionsApi

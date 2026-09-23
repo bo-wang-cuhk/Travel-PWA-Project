@@ -5,6 +5,8 @@ import { tripRepo } from '../repo/tripRepo'
 import { dayRepo } from '../repo/dayRepo'
 import { dayNoteRepo } from '../repo/dayNoteRepo'
 import { placeRepo } from '../repo/placeRepo'
+import { categoryRepo } from '../repo/categoryRepo'
+import { collectionRepo } from '../repo/collectionRepo'
 import { assignmentRepo } from '../repo/assignmentRepo'
 import { accommodationRepo } from '../repo/accommodationRepo'
 import { reservationRepo } from '../repo/reservationRepo'
@@ -353,6 +355,32 @@ describe('local-first SyncManager', () => {
     const pulled = (await budgetRepo.list(pulledTrip.id)).items[0]
     expect(pulled).toMatchObject({ name: 'Lunch', total_price: 42 })
     expect((await offlineDb.budgetItems.get(pulled.id))?.reservation_sync_id).toBeTruthy()
+  })
+
+  it('pushes and pulls categories, place ratings, collections, and saved places', async () => {
+    const provider = new LastWriteWinsProvider()
+    const { category } = await categoryRepo.create({ name: 'Museum', color: '#334455', icon: 'Landmark' })
+    const { trip } = await tripRepo.create({ title: 'Madrid', day_count: 0 })
+    const { place } = await placeRepo.create(trip.id, { name: 'Prado', category_id: category.id })
+    await placeRepo.rate(trip.id, place.id, 5)
+    const collection = await collectionRepo.create({ name: 'Art' })
+    const saved = await collectionRepo.saveFromTrip({ collection_id: collection.id, source_trip_id: trip.id, source_place_id: place.id })
+
+    await new SyncManager(provider).sync()
+    expect(provider.remote.get(category.sync_id)?.payload).toMatchObject({ name: 'Museum' })
+    expect(provider.remote.get(place.sync_id)?.payload).toMatchObject({ categoryId: category.sync_id, ratings: [expect.objectContaining({ rating: 5 })] })
+    expect(provider.remote.get(saved.place!.sync_id)?.payload).toMatchObject({ collectionId: expect.any(String), value: expect.objectContaining({ name: 'Prado' }) })
+
+    await clearAll()
+    await new SyncManager(provider).sync()
+    const pulledCategory = (await categoryRepo.list()).categories[0]
+    const pulledTrip = (await tripRepo.list()).trips[0]
+    const pulledPlace = (await placeRepo.list(pulledTrip.id)).places[0]
+    const pulledCollection = (await collectionRepo.list()).collections[0]
+    const pulledSaved = (await collectionRepo.get(pulledCollection.id)).places[0]
+    expect(pulledCategory).toMatchObject({ name: 'Museum' })
+    expect(pulledPlace).toMatchObject({ name: 'Prado', category_id: pulledCategory.id, rating_avg: 5, rating_count: 1 })
+    expect(pulledSaved).toMatchObject({ name: 'Prado', source_place_id: pulledPlace.id })
   })
 
   it('marks concurrent Expense edits as a conflict without overwriting local data', async () => {

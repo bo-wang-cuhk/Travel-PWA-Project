@@ -4,6 +4,7 @@ import type { ActiveTripResponse, TripCreateRequest, TripUpdateRequest } from '@
 import type { LocalTripRecord } from '../domain/tripSyncModel'
 import type { LocalDayRecord } from '../domain/daySyncModel'
 import type { LocalAssignmentRecord } from '../domain/assignmentSyncModel'
+import type { LocalPlaceRecord } from '../domain/placeSyncModel'
 import { randomId } from '../utils/randomId'
 import { markLocalChange } from '../sync/localChangeRepository'
 import { resolveStoredFileUrl } from './fileRepo'
@@ -132,14 +133,51 @@ function pickActive(trips: Trip[]): Trip | null {
   return ranked[0] ?? null
 }
 
-async function displayTrip<T extends Trip>(trip: T): Promise<T> {
-  return { ...trip, cover_image: await resolveStoredFileUrl(trip.cover_image) } as T
+function companionCount(trip: Trip, members: Array<{ id: number; role?: string }>): number {
+  return members.filter(member => member.role !== 'owner' && member.id !== trip.user_id).length
+}
+
+async function displayTrip<T extends Trip>(
+  trip: T,
+  places?: LocalPlaceRecord[],
+  members?: Array<{ id: number; username: string; role?: string }>,
+): Promise<T> {
+  const activePlaces = places ?? (await offlineDb.places.where('trip_id').equals(trip.id).toArray())
+    .filter(place => !place.deleted_at) as LocalPlaceRecord[]
+  const cachedMembers = members ?? await offlineDb.tripMembers.where('tripId').equals(trip.id).toArray()
+  const owner = cachedMembers.find(member => member.role === 'owner' || member.id === trip.user_id)
+  return {
+    ...trip,
+    cover_image: await resolveStoredFileUrl(trip.cover_image),
+    place_count: activePlaces.length,
+    shared_count: cachedMembers.length > 0 ? companionCount(trip, cachedMembers) : (trip.shared_count ?? 0),
+    owner_username: owner?.username ?? trip.owner_username,
+  } as T
 }
 
 export const tripRepo = {
   async list(): Promise<{ trips: Trip[]; archivedTrips: Trip[] }> {
     if (import.meta.env.DEV && import.meta.env.MODE !== 'test') await ensureDevelopmentSeed()
-    const all = await Promise.all((await offlineDb.trips.toArray()).filter(t => !t.deleted_at).map(displayTrip))
+    const [storedTrips, storedPlaces, storedMembers] = await Promise.all([
+      offlineDb.trips.toArray(),
+      offlineDb.places.toArray(),
+      offlineDb.tripMembers.toArray(),
+    ])
+    const placesByTrip = new Map<number, LocalPlaceRecord[]>()
+    for (const place of storedPlaces) {
+      if (place.deleted_at) continue
+      const rows = placesByTrip.get(place.trip_id) ?? []
+      rows.push(place as LocalPlaceRecord)
+      placesByTrip.set(place.trip_id, rows)
+    }
+    const membersByTrip = new Map<number, typeof storedMembers>()
+    for (const member of storedMembers) {
+      const rows = membersByTrip.get(member.tripId) ?? []
+      rows.push(member)
+      membersByTrip.set(member.tripId, rows)
+    }
+    const all = await Promise.all(storedTrips.filter(t => !t.deleted_at).map(trip =>
+      displayTrip(trip, placesByTrip.get(trip.id) ?? [], membersByTrip.get(trip.id) ?? [])))
     return {
       trips: all.filter(t => !t.is_archived),
       archivedTrips: all.filter(t => t.is_archived),
@@ -167,6 +205,32 @@ export const tripRepo = {
     return { trip: await displayTrip(trip) }
   },
 
+  /** Local data used by the dashboard hero; never calls the legacy bundle API. */
+  async dashboardBundle(tripId: number | string) {
+    const id = Number(tripId)
+    const [trip, storedPlaces, cachedMembers] = await Promise.all([
+      offlineDb.trips.get(id),
+      offlineDb.places.where('trip_id').equals(id).toArray(),
+      offlineDb.tripMembers.where('tripId').equals(id).toArray(),
+    ])
+    if (!trip || trip.deleted_at) throw new Error('Trip not found in local database')
+    const members = cachedMembers.length > 0
+      ? cachedMembers
+      : [{ id: trip.user_id, username: trip.owner_username || '旅行者', role: 'owner' }]
+    const places = await Promise.all(storedPlaces.filter(place => !place.deleted_at).map(async place => ({
+      id: place.id,
+      name: place.name,
+      image_url: await resolveStoredFileUrl(place.image_url),
+      lat: place.lat ?? null,
+      lng: place.lng ?? null,
+      google_place_id: place.google_place_id ?? null,
+      osm_id: place.osm_id ?? null,
+      category_color: place.category?.color ?? null,
+      category_icon: place.category?.icon ?? null,
+    })))
+    return { members, places }
+  },
+
   async create(data: TripCreateRequest, owner?: LocalTripOwner): Promise<{ trip: LocalTripRecord }> {
     return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.days, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
       const trip = tripFromCreate(await nextLocalTripId(), data, owner, new Date().toISOString())
@@ -184,7 +248,7 @@ export const tripRepo = {
 
   async update(tripId: number | string, data: TripUpdateRequest): Promise<{ trip: LocalTripRecord }> {
     const id = Number(tripId)
-    return offlineDb.transaction('rw', [offlineDb.trips, offlineDb.days, offlineDb.assignments, offlineDb.accommodations, offlineDb.reservations, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
+    const result = await offlineDb.transaction('rw', [offlineDb.trips, offlineDb.days, offlineDb.assignments, offlineDb.accommodations, offlineDb.reservations, offlineDb.syncOutbox, offlineDb.entitySyncMeta], async () => {
       const current = await offlineDb.trips.get(id)
       if (!current || current.deleted_at) throw new Error('Trip not found in local database')
       const { date_shift_mode: _dateShiftMode, ...patch } = data
@@ -261,6 +325,7 @@ export const tripRepo = {
       }
       return { trip }
     })
+    return { trip: await displayTrip(result.trip) }
   },
 
   async delete(tripId: number | string): Promise<void> {

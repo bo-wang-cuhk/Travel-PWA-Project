@@ -109,10 +109,8 @@ export const createPlacesSlice = (set: SetState, get: GetState): PlacesSlice => 
   },
 
   ratePlace: async (tripId, placeId, rating) => {
-    // Casts (or clears, rating null) the current user's own star vote (#1435)
-    // and applies the returned place with the fresh average.
     try {
-      const data = await placesApi.rate(tripId, placeId, rating)
+      const data = await placeRepo.rate(tripId, placeId, rating)
       applyUpdatedPlace(set, placeId, data.place)
       return data.place
     } catch (err: unknown) {

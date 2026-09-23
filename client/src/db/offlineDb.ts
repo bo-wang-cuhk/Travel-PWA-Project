@@ -13,6 +13,8 @@ import type { LocalPackingConfigRecord, LocalPackingItemRecord, StoredPackingBag
 import type { LocalVacayRecord } from '../domain/vacaySyncModel';
 import type { LocalTripFileRecord, StoredTripFileRecord } from '../domain/tripFileSyncModel';
 import type { LocalAtlasRecord } from '../domain/atlasSyncModel';
+import type { LocalCategoryRecord, StoredCategoryRecord } from '../domain/categorySyncModel';
+import type { LocalCollectionPlaceRecord, LocalCollectionRecord } from '../domain/collectionSyncModel';
 import type { HolidayCacheRecord } from '../services/holiday/types';
 import type {
   EntitySyncMetaRecord,
@@ -187,7 +189,9 @@ class TrekOfflineDb extends Dexie {
   accommodations!: Table<StoredAccommodationRecord, number>;
   tripMembers!: Table<CachedTripMember, [number, number]>;
   tags!: Table<Tag, number>;
-  categories!: Table<Category, number>;
+  categories!: Table<StoredCategoryRecord, number>;
+  collections!: Table<LocalCollectionRecord, number>;
+  collectionPlaces!: Table<LocalCollectionPlaceRecord, number>;
   mutationQueue!: Table<QueuedMutation, string>;
   syncMeta!: Table<SyncMeta, number>;
   blobCache!: Table<BlobCacheEntry, string>;
@@ -714,6 +718,32 @@ class TrekOfflineDb extends Dexie {
     // v19: private Atlas choices. Derived Trip/Place statistics and public
     // geometry do not belong in this user-data table.
     this.version(19).stores({ atlasData: 'id, updatedAt' });
+
+    // v20: place categories are authored local-first and synced by stable UUID.
+    this.version(20).stores({
+      categories: 'id, &sync_id, deleted_at, updated_at',
+    }).upgrade(async tx => {
+      const now = new Date().toISOString();
+      const rows = await tx.table('categories').toArray() as StoredCategoryRecord[];
+      for (const row of rows) {
+        const category: LocalCategoryRecord = {
+          ...row,
+          sync_id: row.sync_id || randomId(),
+          updated_at: row.updated_at || row.created_at || now,
+          deleted_at: row.deleted_at ?? null,
+        };
+        await tx.table('categories').put(category);
+        const key = `category:${category.sync_id}`;
+        await tx.table('syncOutbox').put({ key, entityType: 'category', entityId: category.sync_id, operation: category.deleted_at ? 'delete' : 'upsert', changedAt: Date.parse(category.updated_at) || Date.now(), status: 'pending', attempts: 0, lastError: null });
+        await tx.table('entitySyncMeta').put({ key, entityType: 'category', entityId: category.sync_id, status: 'pending', remoteVersion: null, lastSyncedAt: null, lastError: null });
+      }
+    });
+
+    // v21: Collections core is available offline; stable UUIDs are cloud keys.
+    this.version(21).stores({
+      collections: 'id, &sync_id, deleted_at, updated_at, sort_order',
+      collectionPlaces: 'id, &sync_id, collection_id, collection_sync_id, source_place_id, deleted_at, updated_at',
+    });
   }
 }
 
@@ -984,7 +1014,17 @@ export async function upsertTags(tags: Tag[]): Promise<void> {
 }
 
 export async function upsertCategories(categories: Category[]): Promise<void> {
-  await offlineDb.categories.bulkPut(categories);
+  const now = new Date().toISOString();
+  for (const category of categories) {
+    const existing = await offlineDb.categories.get(category.id);
+    await offlineDb.categories.put({
+      ...existing,
+      ...category,
+      sync_id: existing?.sync_id || randomId(),
+      updated_at: existing?.updated_at || category.created_at || now,
+      deleted_at: existing?.deleted_at ?? null,
+    });
+  }
 }
 
 export async function upsertSyncMeta(meta: SyncMeta): Promise<void> {
