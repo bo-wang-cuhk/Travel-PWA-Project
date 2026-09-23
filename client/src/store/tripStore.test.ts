@@ -340,6 +340,22 @@ describe('tripStore', () => {
       expect(nudged).toHaveBeenCalledTimes(1);
     });
 
+    it('FE-TSTORE-008b: exposes categories pulled into IndexedDB without reloading the page', async () => {
+      const syncedCategory = buildCategory({ id: -7, name: 'Museum' })
+      await offlineDb.categories.put({
+        ...syncedCategory,
+        sync_id: randomId(),
+        created_at: '2025-01-01T00:00:00.000Z',
+        updated_at: '2025-01-01T00:00:00.000Z',
+        deleted_at: null,
+      })
+      seedStore(useTripStore, { trip: buildTrip({ id: 1 }), categories: [] })
+
+      await useTripStore.getState().hydrateActiveTrip(1)
+
+      expect(useTripStore.getState().categories.map(c => c.name)).toEqual(['Museum'])
+    })
+
     it('FE-TSTORE-009: one failing resource does not wipe the others', async () => {
       const stalePlace = buildPlace({ id: 111, trip_id: 1, name: 'Kept' });
       await upsertPlaces([stalePlace])

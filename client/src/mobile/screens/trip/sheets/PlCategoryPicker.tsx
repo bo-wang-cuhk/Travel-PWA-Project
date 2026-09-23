@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Ban, Check, Plus } from 'lucide-react'
 import { getCategoryIcon } from '../../../../components/shared/categoryIcons'
+import { useAuthStore } from '../../../../store/authStore'
 import { FIELD_CLS } from './PlSheetChrome'
 import type { Category } from '../../../../types'
 import type { TripPlanner } from '../MTripShell'
@@ -17,14 +18,15 @@ const PILL_BASE =
 
 /**
  * Category pills of the place form: "no category" + every trip category, plus
- * an inline create flow (dashed pill → name input) the demo leaves out but the
- * desktop form has — new categories are selected right away.
+ * an administrator-only inline create flow (dashed pill → name input). Newly
+ * created global categories are selected right away.
  */
 export default function PlCategoryPicker({ planner, value, onChange }: PlCategoryPickerProps) {
   const { t, toast, categories, tripActions } = planner
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
   const [saving, setSaving] = useState(false)
+  const isAdmin = useAuthStore(state => state.user?.role === 'admin')
 
   const handleCreate = async () => {
     if (!newName.trim() || saving) return
@@ -66,7 +68,7 @@ export default function PlCategoryPicker({ planner, value, onChange }: PlCategor
           </button>
         )
       })}
-      {!creating ? (
+      {isAdmin && (!creating ? (
         <button
           type="button"
           onClick={() => setCreating(true)}
@@ -111,7 +113,7 @@ export default function PlCategoryPicker({ planner, value, onChange }: PlCategor
             {t('common.cancel')}
           </button>
         </div>
-      )}
+      ))}
     </div>
   )
 }

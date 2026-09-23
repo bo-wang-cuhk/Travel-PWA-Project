@@ -197,6 +197,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       get().loadBudgetItems(tripId),
       get().loadReservations(tripId),
       get().loadFiles(tripId),
+      categoryRepo.list().then(d => set({ categories: d.categories })).catch(() => {}),
     ])
     // Accommodations live in planner-local state, not this store — nudge the
     // planner to reload them too (e.g. a trip date change made while offline).

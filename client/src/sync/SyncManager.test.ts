@@ -381,6 +381,11 @@ describe('local-first SyncManager', () => {
     expect(pulledCategory).toMatchObject({ name: 'Museum' })
     expect(pulledPlace).toMatchObject({ name: 'Prado', category_id: pulledCategory.id, rating_avg: 5, rating_count: 1 })
     expect(pulledSaved).toMatchObject({ name: 'Prado', source_place_id: pulledPlace.id })
+
+    provider.deleteRemote(category.sync_id)
+    await new SyncManager(provider).sync()
+    expect((await categoryRepo.list()).categories).toEqual([])
+    expect((await placeRepo.list(pulledTrip.id)).places[0]).toMatchObject({ category_id: null, category: null })
   })
 
   it('marks concurrent Expense edits as a conflict without overwriting local data', async () => {

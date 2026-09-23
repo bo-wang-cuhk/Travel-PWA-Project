@@ -248,7 +248,7 @@ export class SyncManager {
 
   private async applyRemoteCategory(change: RemoteChange): Promise<'applied' | 'conflict' | 'unchanged'> {
     const key = syncEntityKey(change.entityType, change.entityId)
-    return offlineDb.transaction('rw', [offlineDb.categories, offlineDb.syncOutbox, offlineDb.entitySyncMeta, offlineDb.syncConflicts], async () => {
+    return offlineDb.transaction('rw', [offlineDb.categories, offlineDb.places, offlineDb.syncOutbox, offlineDb.entitySyncMeta, offlineDb.syncConflicts], async () => {
       const [meta, local] = await Promise.all([
         offlineDb.entitySyncMeta.get(key),
         offlineDb.categories.where('sync_id').equals(change.entityId).first(),
@@ -258,6 +258,15 @@ export class SyncManager {
         if (local) {
           const now = new Date().toISOString()
           await offlineDb.categories.put({ ...local, deleted_at: now, updated_at: now })
+          const linkedPlaces = await offlineDb.places
+            .filter(place => place.category_sync_id === change.entityId || place.category_id === local.id)
+            .toArray()
+          await offlineDb.places.bulkPut(linkedPlaces.map(place => ({
+            ...place,
+            category_id: null,
+            category_sync_id: null,
+            category: null,
+          })))
         }
       } else {
         const remote = change.payload as SyncedCategory
