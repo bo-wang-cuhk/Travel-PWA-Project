@@ -87,6 +87,7 @@ const places: TranslationStrings = {
   'places.osmHint':
     'Recherche via OpenStreetMap (pas de photos, horaires ni notes). Ajoutez une clé API Google dans les paramètres pour plus de détails.',
   'places.osmActive': 'OpenStreetMap est utilisé. Une clé API Google ajoute notes et horaires.',
+  'places.searchSource': 'Source du résultat : {source}',
   'places.details.title': 'Détails du lieu',
   'places.details.empty': 'Choisis un résultat pour voir des images et une description.',
   'places.details.loading': 'Chargement des détails...',

@@ -85,6 +85,7 @@ const places: TranslationStrings = {
   'places.osmHint':
     "S'està utilitzant la cerca amb OpenStreetMap (sense fotos, horaris ni valoracions). Afegeix una clau API de Google a Configuració per obtenir tots els detalls.",
   'places.osmActive': 'S\'utilitza OpenStreetMap. Una clau API de Google afegeix valoracions i horaris.',
+  'places.searchSource': 'Font del resultat: {source}',
   'places.details.title': 'Detalls del lloc',
   'places.details.empty': 'Tria un resultat per veure imatges i una descripció.',
   'places.details.loading': "S'estan carregant els detalls...",

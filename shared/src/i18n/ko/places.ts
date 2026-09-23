@@ -86,6 +86,7 @@ const places: TranslationStrings = {
   'places.osmHint':
     'OpenStreetMap 검색 사용 중 (사진, 영업 시간, 평점 없음). 전체 정보를 위해 설정에서 Google API 키를 추가하세요.',
   'places.osmActive': 'OpenStreetMap을 사용 중입니다. Google API 키를 추가하면 평점과 영업시간이 표시됩니다.',
+  'places.searchSource': '검색 결과 출처: {source}',
   'places.details.title': '장소 세부정보',
   'places.details.empty': '검색 결과를 선택하면 사진과 설명이 표시됩니다.',
   'places.details.loading': '세부정보를 불러오는 중...',

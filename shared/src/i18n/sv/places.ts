@@ -87,6 +87,7 @@ const places: TranslationStrings = {
   'places.osmHint':
     'Använder OpenStreetMap-sökningen (inga bilder, öppettider eller betyg). Lägg till en Google API-nyckel i inställningarna för fullständig information.',
   'places.osmActive': 'OpenStreetMap används. En Google API-nyckel lägger till betyg och öppettider.',
+  'places.searchSource': 'Resultatkälla: {source}',
   'places.details.title': 'Platsdetaljer',
   'places.details.empty': 'Välj ett sökresultat för att se bilder och en beskrivning.',
   'places.details.loading': 'Laddar detaljer...',

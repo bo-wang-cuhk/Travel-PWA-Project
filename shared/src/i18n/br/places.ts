@@ -87,6 +87,7 @@ const places: TranslationStrings = {
   'places.osmHint':
     'Busca via OpenStreetMap (sem fotos, horários ou avaliações). Adicione uma chave Google nas configurações para detalhes completos.',
   'places.osmActive': 'Usando o OpenStreetMap. Uma chave de API do Google adiciona avaliações e horários.',
+  'places.searchSource': 'Fonte do resultado: {source}',
   'places.details.title': 'Detalhes do lugar',
   'places.details.empty': 'Escolha um resultado para ver imagens e uma descrição.',
   'places.details.loading': 'Carregando detalhes...',

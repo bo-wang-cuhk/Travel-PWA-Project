@@ -87,6 +87,7 @@ const places: TranslationStrings = {
   'places.osmHint':
     'Χρήση αναζήτησης OpenStreetMap (χωρίς φωτογραφίες, ώρες λειτουργίας ή αξιολογήσεις). Προσθέστε ένα κλειδί Google API στις ρυθμίσεις για πλήρεις λεπτομέρειες.',
   'places.osmActive': 'Χρησιμοποιείται το OpenStreetMap. Ένα κλειδί Google API προσθέτει αξιολογήσεις και ωράρια.',
+  'places.searchSource': 'Πηγή αποτελέσματος: {source}',
   'places.details.title': 'Λεπτομέρειες τοποθεσίας',
   'places.details.empty': 'Διάλεξε ένα αποτέλεσμα για να δεις εικόνες και περιγραφή.',
   'places.details.loading': 'Φόρτωση λεπτομερειών...',

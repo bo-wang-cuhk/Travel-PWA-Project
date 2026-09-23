@@ -87,6 +87,7 @@ const places: TranslationStrings = {
   'places.osmHint':
     'Sử dụng tìm kiếm OpenStreetMap (không có ảnh, giờ mở cửa hoặc xếp hạng). Thêm khóa Google API trong cài đặt để biết đầy đủ chi tiết.',
   'places.osmActive': 'Đang dùng OpenStreetMap. Khóa API Google bổ sung đánh giá và giờ mở cửa.',
+  'places.searchSource': 'Nguồn kết quả: {source}',
   'places.details.title': 'Chi tiết địa điểm',
   'places.details.empty': 'Chọn một kết quả tìm kiếm để xem hình ảnh và mô tả.',
   'places.details.loading': 'Đang tải chi tiết...',
