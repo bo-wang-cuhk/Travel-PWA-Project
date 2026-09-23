@@ -72,7 +72,7 @@ interface VacaySchoolHolidayRaw {
 }
 
 interface VacayApi {
-  getPlan: () => Promise<VacayPlanResponse>
+  getPlan: (refreshWorkspaceMembers?: boolean) => Promise<VacayPlanResponse>
   updatePlan: (data: Partial<VacayPlan>) => Promise<{ plan: VacayPlan }>
   updateColor: (color: string, targetUserId?: number) => Promise<unknown>
   invite: (userId: number) => Promise<unknown>
@@ -171,7 +171,7 @@ interface VacayState {
 
   setSelectedYear: (year: number) => void
   setSelectedUserId: (id: number | null) => void
-  loadPlan: () => Promise<void>
+  loadPlan: (refreshWorkspaceMembers?: boolean) => Promise<void>
   updatePlan: (updates: Partial<VacayPlan>) => Promise<void>
   updateColor: (color: string, targetUserId?: number) => Promise<void>
   invite: (userId: number) => Promise<void>
@@ -198,7 +198,7 @@ interface VacayState {
   setShareHidden: (shareId: number, hidden: boolean) => Promise<void>
   loadYearSettings: () => Promise<void>
   updateYearSettings: (data: VacayYearSettingsRequest) => Promise<void>
-  loadAll: () => Promise<void>
+  loadAll: (options?: { refreshWorkspaceMembers?: boolean; showLoading?: boolean }) => Promise<void>
 }
 
 export const useVacayStore = create<VacayState>((set, get) => ({
@@ -225,15 +225,15 @@ export const useVacayStore = create<VacayState>((set, get) => ({
   setSelectedYear: (year: number) => set({ selectedYear: year }),
   setSelectedUserId: (id: number | null) => set({ selectedUserId: id }),
 
-  loadPlan: async () => {
-    const data = await api.getPlan()
+  loadPlan: async (refreshWorkspaceMembers = true) => {
+    const data = await api.getPlan(refreshWorkspaceMembers)
     set({
       plan: data.plan,
       users: data.users,
       pendingInvites: data.pendingInvites,
       incomingInvites: data.incomingInvites,
-      isOwner: data.isOwner,
       isFused: data.isFused,
+      ...(refreshWorkspaceMembers ? { isOwner: data.isOwner } : {}),
     })
   },
 
@@ -500,10 +500,11 @@ export const useVacayStore = create<VacayState>((set, get) => ({
     await get().loadSharedCalendars(year)
   },
 
-  loadAll: async () => {
-    set({ loading: true })
+  loadAll: async (options = {}) => {
+    const { refreshWorkspaceMembers = true, showLoading = true } = options
+    if (showLoading) set({ loading: true })
     try {
-      await get().loadPlan()
+      await get().loadPlan(refreshWorkspaceMembers)
       // The leave-year window decides which period is current, so it is resolved
       // before the year list picks a default (#737).
       await get().loadYearSettings()
@@ -515,7 +516,7 @@ export const useVacayStore = create<VacayState>((set, get) => ({
       await get().loadShares()
       await get().loadSharedCalendars(year)
     } finally {
-      set({ loading: false })
+      if (showLoading) set({ loading: false })
     }
   },
 }))

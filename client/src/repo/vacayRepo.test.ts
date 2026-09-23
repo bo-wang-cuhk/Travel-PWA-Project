@@ -14,6 +14,14 @@ describe('vacayRepo local-first', () => {
     expect((await offlineDb.vacayData.get('personal-vacay'))?.entryTombstones['1:2026-06-20']).toBeTruthy(); expect(fetchSpy).not.toHaveBeenCalled()
   })
 
+  it('keeps every entry when several days are toggled concurrently', async () => {
+    const dates = Array.from({ length: 7 }, (_, index) => `2026-06-${String(index + 20).padStart(2, '0')}`)
+
+    await Promise.all(dates.map(date => vacayRepo.toggleEntry(date, 1, 1, 'vacation')))
+
+    expect((await vacayRepo.getEntries(2026)).entries.map(entry => entry.date).sort()).toEqual(dates)
+  })
+
   it('persists settings, years, company holidays and entitlement', async () => {
     await vacayRepo.addYear(2027); await vacayRepo.toggleCompanyHoliday('2027-06-02'); await vacayRepo.updateStats(2027, 25)
     await vacayRepo.updateYearSettings({ year_type: 'fiscal', year_start_month: 4, year_start_day: 1, hire_date: null })

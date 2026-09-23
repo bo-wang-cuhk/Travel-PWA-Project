@@ -12,6 +12,16 @@ import { SUPABASE_AUTH_ENABLED } from '../auth/supabaseClient'
 
 const MEMBER_COLORS = ['#3b82f6', '#ec4899', '#14b8a6', '#8b5cf6', '#ef4444', '#22c55e']
 
+// Calendar clicks can arrive before the previous IndexedDB read-modify-write
+// finishes. Keep those mutations in order so each one sees the last saved value.
+let calendarMutationQueue: Promise<void> = Promise.resolve()
+
+function serializeCalendarMutation<T>(mutation: () => Promise<T>): Promise<T> {
+  const result = calendarMutationQueue.then(mutation, mutation)
+  calendarMutationQueue = result.then(() => undefined, () => undefined)
+  return result
+}
+
 function currentUser(): VacayUser {
   try {
     const raw = localStorage.getItem('trek_auth_snapshot')
@@ -67,10 +77,10 @@ function withWorkspaceUsers(value: LocalVacayRecord, members: WorkspacePerson[])
 }
 
 export const vacayRepo = {
-  async getPlan() {
+  async getPlan(refreshWorkspaceMembers = true) {
     let value = await read()
     let isOwner = true
-    if (SUPABASE_AUTH_ENABLED && typeof navigator !== 'undefined' && navigator.onLine) {
+    if (refreshWorkspaceMembers && SUPABASE_AUTH_ENABLED && typeof navigator !== 'undefined' && navigator.onLine) {
       try {
         const context = await workspaceMembersApi.context()
         value = withWorkspaceUsers(value, context.members)
@@ -102,13 +112,19 @@ export const vacayRepo = {
   async removeYear(year: number) { const value = await read(); value.years = value.years.filter(v => v !== year); await write(value); return { years: value.years } },
   async getEntries(year: number) { const value = await read(); return { entries: value.entries.filter(v => inGridWindow(v.date, year, value.yearSettings)), companyHolidays: value.companyHolidays.filter(v => inGridWindow(v.date, year, value.yearSettings)) } },
   async toggleEntry(date: string, targetUserId?: number, fraction: 0.5 | 1 = 1, kind: 'vacation' | 'comp' = 'vacation') {
-    const value = await read(); const userId = targetUserId ?? currentUser().id; const key = `${userId}:${date}`; const existing = value.entries.find(v => v.user_id === userId && v.date === date)
-    if (existing && (existing.fraction ?? 1) === fraction && (existing.kind ?? 'vacation') === kind) { value.entries = value.entries.filter(v => !(v.user_id === userId && v.date === date)); value.entryTombstones[key] = new Date().toISOString() }
-    else if (existing) { value.entries = value.entries.map(v => v === existing ? { ...v, fraction, kind } : v); delete value.entryTombstones[key] }
-    else { const user = value.users.find(v => v.id === userId) ?? currentUser(); value.entries.push({ date, user_id: userId, fraction, kind, person_name: user.username, person_color: user.color ?? undefined }); delete value.entryTombstones[key] }
-    await write(value); return { success: true }
+    return serializeCalendarMutation(async () => {
+      const value = await read(); const userId = targetUserId ?? currentUser().id; const key = `${userId}:${date}`; const existing = value.entries.find(v => v.user_id === userId && v.date === date)
+      if (existing && (existing.fraction ?? 1) === fraction && (existing.kind ?? 'vacation') === kind) { value.entries = value.entries.filter(v => !(v.user_id === userId && v.date === date)); value.entryTombstones[key] = new Date().toISOString() }
+      else if (existing) { value.entries = value.entries.map(v => v === existing ? { ...v, fraction, kind } : v); delete value.entryTombstones[key] }
+      else { const user = value.users.find(v => v.id === userId) ?? currentUser(); value.entries.push({ date, user_id: userId, fraction, kind, person_name: user.username, person_color: user.color ?? undefined }); delete value.entryTombstones[key] }
+      await write(value); return { success: true }
+    })
   },
-  async toggleCompanyHoliday(date: string) { const value = await read(); value.companyHolidays = value.companyHolidays.some(v => v.date === date) ? value.companyHolidays.filter(v => v.date !== date) : [...value.companyHolidays, { date }]; await write(value); return { success: true } },
+  async toggleCompanyHoliday(date: string) {
+    return serializeCalendarMutation(async () => {
+      const value = await read(); value.companyHolidays = value.companyHolidays.some(v => v.date === date) ? value.companyHolidays.filter(v => v.date !== date) : [...value.companyHolidays, { date }]; await write(value); return { success: true }
+    })
+  },
   async getStats(year: number) { const value = await read(); const stats = computeStats(value, year); value.stats = [...value.stats.filter(v => v.year !== year), ...stats]; await offlineDb.vacayData.put(value); return { stats } },
   async updateStats(year: number, days: number, targetUserId?: number) { const value = await read(); const id = targetUserId ?? currentUser().id; const stats = computeStats(value, year); value.stats = [...value.stats.filter(v => v.year !== year), ...stats.map(v => v.user_id === id ? { ...v, vacation_days: days, total_available: days + v.carried_over, remaining: days + v.carried_over - v.used } : v)]; await write(value); return { success: true } },
   async getHolidays(year: number, country: string) {

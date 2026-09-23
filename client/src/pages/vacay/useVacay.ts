@@ -41,7 +41,16 @@ export function useVacay() {
   // Supabase Realtime wakes the durable sync pipeline. Refresh the visible
   // Vacay store only after its IndexedDB pull has completed.
   useEffect(() => {
-    const onSyncComplete = () => { void loadAll() }
+    const onSyncComplete = (event: Event) => {
+      const pulled = (event as CustomEvent<{ pulled?: number }>).detail?.pulled
+      // Local toggles already update the Vacay store optimistically. Reloading
+      // the whole page here used to call workspace-members after every edit and
+      // replace the calendar with a spinner while that request was in flight.
+      if (pulled === 0) return
+      // Pulled Vacay data is already in IndexedDB. Rehydrate it in the background;
+      // workspace membership is unrelated and was loaded when the page opened.
+      void loadAll({ refreshWorkspaceMembers: false, showLoading: false })
+    }
     window.addEventListener('travel-sync-complete', onSyncComplete)
     return () => window.removeEventListener('travel-sync-complete', onSyncComplete)
   }, [loadAll])
