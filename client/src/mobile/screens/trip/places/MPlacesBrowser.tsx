@@ -17,6 +17,7 @@ import type { Place } from '../../../../types'
 import MPlacesBulkCategorySheet from './MPlacesBulkCategorySheet'
 import MPlacesSaveToCollectionSheet from './MPlacesSaveToCollectionSheet'
 import { filterPool, firstPlannedDayNumbers, plannedPlaceIds } from './placesBrowserModel'
+import MPlaceVisitStatus from './MPlaceVisitStatus'
 
 /**
  * Fullscreen places pool (mode === 'browse'): All/Unplanned/Tracks filter
@@ -322,7 +323,7 @@ export default function MPlacesBrowser({ planner, shell }: MPlacesBrowserProps) 
             const dayNumber = dayNumberByPlace.get(place.id)
             const sub = place.address || place.description
             return (
-              <div key={place.id} className="flex items-center gap-[11px] border-b border-[color:var(--m-rowbr)] px-[2px] py-[9px]">
+              <div key={place.id} className="flex items-center gap-[11px] border-b border-[color:var(--m-rowbr)] px-[2px] py-[9px]" style={{ opacity: place.visit_status === 'skipped' ? .7 : 1 }}>
                 <button type="button" onClick={() => openRow(place)} className="flex min-w-0 flex-1 items-center gap-[11px] text-left">
                   {selectMode && <SquareCheck big checked={selectedIds.has(place.id)} />}
                   <PlaceAvatar place={place} category={cat} size={40} />
@@ -360,6 +361,12 @@ export default function MPlacesBrowser({ planner, shell }: MPlacesBrowserProps) 
                     <Plus size={14} strokeWidth={2.2} />
                   </button>
                 )}
+                {!selectMode && <MPlaceVisitStatus
+                  name={place.name}
+                  status={place.visit_status}
+                  canEdit={canEditPlaces}
+                  onUpdate={status => planner.tripActions.updatePlace(planner.tripId, place.id, { visit_status: status })}
+                />}
               </div>
             )
           })

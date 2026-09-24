@@ -2,12 +2,13 @@ import { useEffect, useRef } from 'react'
 import { Check, Circle, Minus } from 'lucide-react'
 import type { VisitStatus } from './placeVisitStatusModel'
 
-export function PlaceVisitStatus({ status = 'planned', canEdit, t, onToggle, onMenu }: {
+export function PlaceVisitStatus({ status = 'planned', canEdit, t, onToggle, onMenu, mobile = false }: {
   status?: VisitStatus
   canEdit: boolean
   t: (key: string) => string
   onToggle: () => void
   onMenu: (x: number, y: number) => void
+  mobile?: boolean
 }) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const origin = useRef<{ x: number; y: number } | null>(null)
@@ -49,9 +50,11 @@ export function PlaceVisitStatus({ status = 'planned', canEdit, t, onToggle, onM
     onTouchEnd={clear}
     onTouchCancel={clear}
     style={{
-      width: 28, height: 28, flexShrink: 0, display: 'grid', placeItems: 'center',
+      width: mobile ? 40 : 28, height: mobile ? 40 : 28, flexShrink: 0, display: 'grid', placeItems: 'center',
       border: 0, borderRadius: 7, padding: 0, background: 'transparent',
-      color: status === 'visited' ? '#16a34a' : status === 'skipped' ? 'var(--text-faint)' : 'var(--text-muted)',
+      color: status === 'visited' ? '#16a34a' : status === 'skipped'
+        ? mobile ? 'var(--m-faint)' : 'var(--text-faint)'
+        : mobile ? 'var(--m-muted)' : 'var(--text-muted)',
       cursor: canEdit ? 'pointer' : 'default', touchAction: 'manipulation',
     }}
   ><Icon size={17} strokeWidth={status === 'visited' ? 2.8 : 2} /></button>

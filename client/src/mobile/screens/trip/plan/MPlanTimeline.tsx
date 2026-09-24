@@ -199,6 +199,8 @@ export default function MPlanTimeline({ planner, shell }: MPlanTimelineProps) {
                     onOpen={() => openPlace(row.assignment)}
                     onEdit={() => tl.editAssignment(row.assignment)}
                     onRemove={() => tl.removeAssignment(row.assignment)}
+                    canEditPlace={planner.can('place_edit', trip)}
+                    onVisitStatus={status => planner.tripActions.updatePlace(planner.tripId, row.assignment.place_id, { visit_status: status })}
                   />
                   {dayScheduleFor('assignment', row.assignment.id)}
                 </Fragment>

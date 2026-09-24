@@ -88,6 +88,8 @@ describe('PlaceRow', () => {
     onOpen: vi.fn(),
     onEdit: vi.fn(),
     onRemove: vi.fn(),
+    canEditPlace: true,
+    onVisitStatus: vi.fn().mockResolvedValue(undefined),
   }
 
   it('FE-MOB-PLROW-004: shows name, formatted time and the address subtitle', () => {
@@ -155,6 +157,17 @@ describe('PlaceRow', () => {
     fireEvent.click(screen.getByText('Museum'))
 
     expect(onOpen).toHaveBeenCalledTimes(1)
+  })
+
+  it('tapping the visit icon updates the place without opening its row', () => {
+    const onOpen = vi.fn()
+    const onVisitStatus = vi.fn().mockResolvedValue(undefined)
+    render(<PlaceRow {...props} fullPlace={{ id: 101, name: 'Museum', visit_status: 'planned' } as Place} onOpen={onOpen} onVisitStatus={onVisitStatus} />)
+
+    fireEvent.click(screen.getByTitle(/计划中|Planned/))
+
+    expect(onVisitStatus).toHaveBeenCalledWith('visited')
+    expect(onOpen).not.toHaveBeenCalled()
   })
 
   it('FE-MOB-PLROW-012: edit mode swaps the avatar for edit/remove circles plus the reorder slot', () => {

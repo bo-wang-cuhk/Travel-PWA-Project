@@ -17,6 +17,8 @@ import type { TransitLegDisplay } from '../../../../components/Planner/transitDi
 import type { Assignment, DayNote, Place, Reservation, RouteSegment, TranslationFn } from '../../../../types'
 import { formatScheduleMinutes } from '../../../../components/Plugins/PluginDaySchedule'
 import type { PluginDayScheduleItem } from '../../../../api/client'
+import MPlaceVisitStatus from '../places/MPlaceVisitStatus'
+import type { VisitStatus } from '../../../../components/Planner/placeVisitStatusModel'
 
 /**
  * The five row types of the mobile day timeline (place / manual transport /
@@ -119,7 +121,7 @@ const TIME_CHIP = 'flex-none whitespace-nowrap rounded-[6px] bg-[color:var(--m-i
 
 // ── b3) Place row ────────────────────────────────────────────────────────────
 
-export function PlaceRow({ assignment, fullPlace, linkedReservations, chrome, reorder, drag, onOpen, onEdit, onRemove }: {
+export function PlaceRow({ assignment, fullPlace, linkedReservations, chrome, reorder, drag, onOpen, onEdit, onRemove, canEditPlace, onVisitStatus }: {
   assignment: Assignment
   fullPlace: Place | undefined
   linkedReservations: Reservation[]
@@ -129,6 +131,8 @@ export function PlaceRow({ assignment, fullPlace, linkedReservations, chrome, re
   onOpen: () => void
   onEdit: () => void
   onRemove: () => void
+  canEditPlace: boolean
+  onVisitStatus: (status: VisitStatus) => Promise<unknown>
 }) {
   const { t } = chrome
   const place = assignment.place
@@ -161,6 +165,7 @@ export function PlaceRow({ assignment, fullPlace, linkedReservations, chrome, re
       onClick={onOpen}
       onKeyDown={e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onOpen() } }}
       className={`flex cursor-pointer items-center gap-2.5 py-1.5 ${dragClass(drag)}`}
+      style={{ opacity: fullPlace?.visit_status === 'skipped' ? .7 : 1 }}
     >
       {!chrome.editing && (
         <AvatarRing className="shadow-[0_3px_8px_-3px_rgba(0,0,0,.4)]">
@@ -222,6 +227,12 @@ export function PlaceRow({ assignment, fullPlace, linkedReservations, chrome, re
           {reorder}
         </span>
       )}
+      <MPlaceVisitStatus
+        name={place?.name ?? fullPlace?.name ?? ''}
+        status={fullPlace?.visit_status}
+        canEdit={canEditPlace}
+        onUpdate={onVisitStatus}
+      />
     </div>
   )
 }
