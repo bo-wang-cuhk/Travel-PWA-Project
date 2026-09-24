@@ -52,7 +52,6 @@ const AtlasPage = lazyWithRetry(() => import('./pages/AtlasPage'))
 const JourneyPage = lazyWithRetry(() => import('./pages/JourneyPage'))
 const JourneyDetailPage = lazyWithRetry(() => import('./pages/JourneyDetailPage'))
 const JourneyStudioPage = lazyWithRetry(() => import('./pages/JourneyStudioPage'))
-const LocalJourneyPage = lazyWithRetry(() => import('./pages/LocalJourneyPage'))
 const LocalJourneyDetailPage = lazyWithRetry(() => import('./pages/LocalJourneyDetailPage'))
 const CollectionsPage = lazyWithRetry(() => import('./pages/CollectionsPage'))
 const JourneyPublicPage = lazyWithRetry(() => import('./pages/JourneyPublicPage'))
@@ -550,7 +549,7 @@ export default function App() {
             path="/journey"
             element={
               <ProtectedRoute addonId="journey">
-                {STANDALONE_MODE ? <LocalJourneyPage /> : <ViewportRoute phone={MJourneyScreen} desktop={JourneyPage} />}
+                <ViewportRoute phone={MJourneyScreen} desktop={JourneyPage} />
               </ProtectedRoute>
             }
           />

@@ -2,8 +2,16 @@ import { Link } from 'react-router'
 import { ArrowDown, ArrowLeft, ArrowUp, CalendarDays, MapPin, Pencil, Plus, Trash2, UserPlus } from 'lucide-react'
 import type { JourneyDetail } from '../store/journeyStore'
 import { useLocalJourneyDetail } from './localJourney/useLocalJourneyDetail'
+import PageShell from '../components/Layout/PageShell'
+import { useIsPhone } from '../mobile/useIsPhone'
 
 export default function LocalJourneyDetailPage() {
+  const isPhone = useIsPhone()
+  const content = <LocalJourneyDetailContent />
+  return isPhone ? content : <PageShell background="var(--vg-bg)" navOffset="var(--nav-h, 56px)">{content}</PageShell>
+}
+
+function LocalJourneyDetailContent() {
   const { zh, journey, loading, error, editing, setEditing, entryTitle, setEntryTitle, entryDate, setEntryDate, story, setStory, placeId, setPlaceId, locationName, setLocationName, places, members, showMembers, setShowMembers, selectedMember, setSelectedMember, selectedRole, setSelectedRole, showSettings, setShowSettings, settingsTitle, setSettingsTitle, settingsSubtitle, setSettingsSubtitle, settingsStatus, setSettingsStatus, tripOptions, selectedTrips, setSelectedTrips, saving, canEdit, openEditor, saveEntry, deleteEntry, moveEntry, openMembers, addMember, removeMember, removeJourney, openSettings, saveSettings, toggleArchive, changeMemberRole } = useLocalJourneyDetail()
 
   if (loading) return <main className="mx-auto max-w-5xl px-4 py-8 text-content-muted">{zh ? '正在读取旅程…' : 'Loading journey…'}</main>
