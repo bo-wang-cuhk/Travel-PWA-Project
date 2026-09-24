@@ -42,8 +42,10 @@ import { useSettingsStore } from './store/settingsStore'
 import { useAddonStore } from './store/addonStore'
 import { usePluginStore } from './store/pluginStore'
 import { reopenForUser } from './db/offlineDb'
+import { installPwaUpdates } from './utils/pwaUpdates'
 
 maybeInstallTouchDragPolyfill()
+if (STANDALONE_MODE && 'serviceWorker' in navigator) installPwaUpdates(navigator.serviceWorker)
 if (!STANDALONE_MODE) startConnectivityProbe()
 // Keep offline data (map tiles, file blobs, IndexedDB) exempt from eviction.
 requestPersistentStorage()
