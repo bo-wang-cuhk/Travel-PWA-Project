@@ -72,9 +72,9 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
     setColorPickerOpen(false)
   }
 
-  const category = place?.category
-    ?? planner.categories.find(c => c.id === place?.category_id)
-    ?? null
+  const category = place?.category_id == null
+    ? null
+    : planner.categories.find(c => c.id === place.category_id) ?? null
   const CatIcon = getCategoryIcon(category?.icon)
 
   // Every day this place is assigned to (the audit's day-assignment gap).

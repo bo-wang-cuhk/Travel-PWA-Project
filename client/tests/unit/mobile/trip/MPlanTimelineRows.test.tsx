@@ -5,7 +5,7 @@ import {
 } from '../../../../src/mobile/screens/trip/plan/MPlanTimelineRows'
 import type { TransitMeta, TransportEntry } from '../../../../src/mobile/screens/trip/plan/planTimelineModel'
 import type { PluginDayScheduleItem } from '../../../../src/api/client'
-import type { Assignment, DayNote, Place, Reservation, RouteSegment, TranslationFn } from '../../../../src/types'
+import type { Assignment, Category, DayNote, Place, Reservation, RouteSegment, TranslationFn } from '../../../../src/types'
 
 // FE-MOB-PLROW-001 to FE-MOB-PLROW-041
 
@@ -82,6 +82,7 @@ describe('PlaceRow', () => {
   const props = {
     assignment: assignment(),
     fullPlace: undefined,
+    categories: [] as Category[],
     linkedReservations: [],
     chrome: chrome(),
     reorder: REORDER,
@@ -98,6 +99,20 @@ describe('PlaceRow', () => {
     expect(screen.getByText('Museum')).toBeInTheDocument()
     expect(screen.getByText('09:30')).toBeInTheDocument()
     expect(screen.getByText('Museum Rd 1')).toBeInTheDocument()
+  })
+
+  it('uses the current category icon after its synced definition changes', () => {
+    const a = assignment({ place: { id: 101, name: 'Museum', category_id: 7, category: { icon: 'Landmark' } } })
+    const fullPlace = { id: 101, name: 'Museum', category_id: 7 } as Place
+    const category = { id: 7, name: 'Sight', icon: 'Mountain', color: '#1f8b56' } as Category
+    const { container, rerender } = render(<PlaceRow {...props} assignment={a} fullPlace={fullPlace} categories={[category]} />)
+
+    expect(container.querySelector('svg.lucide-mountain')).toBeInTheDocument()
+    expect(container.querySelector('svg.lucide-landmark')).not.toBeInTheDocument()
+
+    rerender(<PlaceRow {...props} assignment={a} fullPlace={fullPlace} categories={[{ ...category, icon: 'Coffee' }]} />)
+    expect(container.querySelector('svg.lucide-coffee')).toBeInTheDocument()
+    expect(container.querySelector('svg.lucide-mountain')).not.toBeInTheDocument()
   })
 
   it('FE-MOB-PLROW-005: falls back to the description when there is no address', () => {

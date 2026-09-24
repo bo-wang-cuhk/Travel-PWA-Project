@@ -20,9 +20,54 @@
     <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
 
     <!-- Fonts are bundled from @fontsource in src/main.tsx, see the note there. -->
+    <style>
+      /* Painted before the JavaScript bundle loads, using the login takeoff palette. */
+      #startup-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        background: #070c1a;
+        color: white;
+        opacity: 1;
+        transition: opacity 240ms ease;
+      }
+      #startup-splash.is-leaving { opacity: 0; }
+      #startup-splash::before {
+        content: '';
+        position: absolute;
+        inset: -20%;
+        background:
+          radial-gradient(circle at 24% 38%, rgba(99, 102, 241, .28), transparent 32%),
+          radial-gradient(circle at 77% 69%, rgba(6, 182, 212, .22), transparent 30%),
+          radial-gradient(circle, rgba(165, 180, 252, .22) 1px, transparent 1.5px);
+        background-size: auto, auto, 28px 28px;
+        animation: startup-world 3.6s ease-in-out infinite alternate;
+      }
+      #startup-splash-content { position: relative; display: flex; flex-direction: column; align-items: center; gap: 22px; }
+      #startup-splash-logo { width: 172px; height: auto; filter: drop-shadow(0 0 26px rgba(109, 130, 255, .45)); animation: startup-mark 1.8s ease-in-out infinite alternate; }
+      #startup-splash-progress { display: flex; gap: 8px; }
+      #startup-splash-progress span { width: 5px; height: 5px; border-radius: 50%; background: rgba(255, 255, 255, .75); animation: startup-dot 1.2s ease-in-out infinite; }
+      #startup-splash-progress span:nth-child(2) { animation-delay: 150ms; }
+      #startup-splash-progress span:nth-child(3) { animation-delay: 300ms; }
+      @keyframes startup-world { from { transform: scale(1.04) translateX(-1%); opacity: .65; } to { transform: scale(1) translateX(1%); opacity: 1; } }
+      @keyframes startup-mark { from { transform: translateY(3px); opacity: .78; } to { transform: translateY(-3px); opacity: 1; } }
+      @keyframes startup-dot { 0%, 70%, 100% { transform: translateY(0); opacity: .35; } 35% { transform: translateY(-6px); opacity: 1; } }
+      @media (prefers-reduced-motion: reduce) {
+        #startup-splash::before, #startup-splash-logo, #startup-splash-progress span { animation: none; }
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <div id="startup-splash" role="status" aria-label="TREK loading">
+      <div id="startup-splash-content">
+        <img id="startup-splash-logo" src="%BASE_URL%logo-light.svg" alt="TREK" />
+        <div id="startup-splash-progress" aria-hidden="true"><span></span><span></span><span></span></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

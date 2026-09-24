@@ -14,7 +14,7 @@ import { transportSubtitle, type TransitMeta, type TransportEntry } from './plan
 import { splitNoteTime } from '../lib/dayNotes'
 import type { DragRowProps } from './useMPlanDragReorder'
 import type { TransitLegDisplay } from '../../../../components/Planner/transitDisplay'
-import type { Assignment, DayNote, Place, Reservation, RouteSegment, TranslationFn } from '../../../../types'
+import type { Assignment, Category, DayNote, Place, Reservation, RouteSegment, TranslationFn } from '../../../../types'
 import { formatScheduleMinutes } from '../../../../components/Plugins/PluginDaySchedule'
 import type { PluginDayScheduleItem } from '../../../../api/client'
 import MPlaceVisitStatus from '../places/MPlaceVisitStatus'
@@ -121,9 +121,10 @@ const TIME_CHIP = 'flex-none whitespace-nowrap rounded-[6px] bg-[color:var(--m-i
 
 // ── b3) Place row ────────────────────────────────────────────────────────────
 
-export function PlaceRow({ assignment, fullPlace, linkedReservations, chrome, reorder, drag, onOpen, onEdit, onRemove, canEditPlace, onVisitStatus }: {
+export function PlaceRow({ assignment, fullPlace, categories, linkedReservations, chrome, reorder, drag, onOpen, onEdit, onRemove, canEditPlace, onVisitStatus }: {
   assignment: Assignment
   fullPlace: Place | undefined
+  categories: Category[]
   linkedReservations: Reservation[]
   chrome: RowChrome
   reorder: ReactNode
@@ -136,7 +137,9 @@ export function PlaceRow({ assignment, fullPlace, linkedReservations, chrome, re
 }) {
   const { t } = chrome
   const place = assignment.place
-  const CatIcon = getCategoryIcon(place?.category?.icon)
+  const categoryId = fullPlace ? fullPlace.category_id : place?.category_id
+  const category = categoryId == null ? null : categories.find(c => c.id === categoryId) ?? null
+  const CatIcon = getCategoryIcon(category?.icon)
   const time = fmtTime(place?.place_time, chrome)
   // One line per booking on the stop (#2201). A single one keeps the bare
   // status line it always had; once there are several, the title tells them
@@ -180,7 +183,7 @@ export function PlaceRow({ assignment, fullPlace, linkedReservations, chrome, re
               lng: place?.lng ?? null,
             }}
             size={27}
-            category={place?.category ? { color: place.category.color ?? undefined, icon: place.category.icon ?? undefined } : null}
+            category={category}
           />
         </AvatarRing>
       )}

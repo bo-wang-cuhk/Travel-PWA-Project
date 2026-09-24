@@ -32,6 +32,7 @@ import './pages/Trips/noticeActions.js'
 import { managedRoutes } from './managed'
 import { STANDALONE_MODE } from './config/runtimeMode'
 import { registerLocalFirstSyncTriggers, unregisterLocalFirstSyncTriggers } from './sync/syncScheduler'
+import { finishStartupSplash } from './utils/startupSplash'
 
 // Every page below loads on demand. The entry chunk used to carry all twenty of
 // them eagerly, so opening /dashboard also paid for the planner, the journal, the
@@ -81,6 +82,11 @@ interface ProtectedRouteProps {
   children: ReactNode
   adminRequired?: boolean
   addonId?: string
+}
+
+function StartupReady() {
+  useEffect(finishStartupSplash, [])
+  return null
 }
 
 function ProtectedRoute({ children, adminRequired = false, addonId }: ProtectedRouteProps) {
@@ -144,6 +150,7 @@ function ProtectedRoute({ children, adminRequired = false, addonId }: ProtectedR
   // instance across a navigation and the error would follow the user around.
   return (
     <MobileShell isPhone={isPhone}>
+      <StartupReady />
       <ErrorBoundary
         key={location.pathname}
         boundaryId="route"
@@ -182,6 +189,7 @@ function PublicRoute({ children, redirectAuthed = false }: { children: React.Rea
   }
   return (
     <ErrorBoundary key={location.pathname} boundaryId="public-route" level="route">
+      <StartupReady />
       {children}
     </ErrorBoundary>
   )

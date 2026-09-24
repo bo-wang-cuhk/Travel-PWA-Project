@@ -92,4 +92,8 @@ async function bootstrap(): Promise<void> {
   )
 }
 
-void bootstrap()
+void bootstrap().catch(error => {
+  console.error('[startup] Unable to initialize TREK', error)
+  const progress = document.getElementById('startup-splash-progress')
+  if (progress) progress.textContent = 'TREK 启动失败，请重新打开应用'
+})
