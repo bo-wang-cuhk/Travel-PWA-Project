@@ -32,6 +32,8 @@ import type { TranslationFn } from '../../types'
 /** The place the column is describing. Null while nothing is selected. */
 export interface PlaceDetailsSelection {
   placeId?: string
+  source?: 'baidu' | 'google' | 'osm'
+  providerPlaceId?: string
   lat: number
   lng: number
   name: string

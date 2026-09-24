@@ -1,6 +1,14 @@
 import type { TranslationStrings } from '../types';
 
 const places: TranslationStrings = {
+  'places.visitPlanned': 'Geplant',
+  'places.visitVisited': 'Besucht',
+  'places.visitSkipped': 'Nicht besucht',
+  'places.maybeArrived': 'Du scheinst bei „{name}“ angekommen zu sein',
+  'places.markVisited': 'Als besucht markieren',
+  'places.ignoreArrival': 'Ignorieren',
+  'places.unconfirmedCount': 'Für diese Reise müssen noch {count} Orte bestätigt werden',
+  'places.reviewVisits': 'Besuche prüfen',
   'places.addPlace': 'Ort/Aktivität hinzufügen',
   'places.importFile': 'Dateimport',
   'places.trackIndicator': 'Strecke / Route',

@@ -19,6 +19,20 @@ async function seedTrip(): Promise<{ tripId: number; dayId: number }> {
 }
 
 describe('placeRepo local IndexedDB data source', () => {
+  it('stores visit status independently and treats legacy rows as planned', async () => {
+    const { tripId } = await seedTrip()
+    const { place } = await placeRepo.create(tripId, { name: 'Cafe' })
+    expect(place.visit_status).toBe('planned')
+    await offlineDb.syncOutbox.clear()
+    await placeRepo.update(tripId, place.id, { visit_status: 'visited' })
+    expect((await placeRepo.get(place.id)).place.visit_status).toBe('visited')
+    expect(await offlineDb.syncOutbox.get(`place:${place.sync_id}`)).toMatchObject({ operation: 'upsert' })
+    await placeRepo.update(tripId, place.id, { visit_status: 'skipped' })
+    expect((await placeRepo.list(tripId)).places[0].visit_status).toBe('skipped')
+    await offlineDb.places.update(place.id, { visit_status: undefined })
+    expect((await placeRepo.list(tripId)).places[0].visit_status).toBe('planned')
+  })
+
   it('FE-REPO-PLACE-001: creates and lists a Place without fetch', async () => {
     const { tripId } = await seedTrip()
     const fetchSpy = vi.spyOn(globalThis, 'fetch')

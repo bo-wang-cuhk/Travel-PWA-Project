@@ -10,7 +10,7 @@ import { usePermissionsStore } from '../../store/permissionsStore'
 import { usePluginStore } from '../../store/pluginStore'
 import { useBackgroundTasksStore } from '../../store/backgroundTasksStore'
 import { resetAllStores, seedStore } from '../../../tests/helpers/store'
-import { buildUser, buildTrip, buildDay, buildPlace, buildAssignment, buildReservation } from '../../../tests/helpers/factories'
+import { buildUser, buildTrip, buildDay, buildPlace, buildAssignment, buildReservation, buildCategory } from '../../../tests/helpers/factories'
 import {
   addonsApi, authApi, tripsApi,
   healthApi, airtrailApi, mapsApi,
@@ -626,6 +626,30 @@ describe('useTripPlanner — ?create intents', () => {
 describe('useTripPlanner — map derivations', () => {
   const geo = (id: number, extra: Partial<Place> = {}) =>
     buildPlace({ id, lat: 10 + id, lng: 20 + id, ...extra })
+
+  it('passes category icon and color to markers from current categories or an embedded category', async () => {
+    const museum = buildCategory({ id: 3, name: 'Museum', icon: 'Landmark', color: '#123456' })
+    seedTrip({
+      categories: [museum],
+      places: [
+        geo(1, { category_id: 3, category: null }),
+        geo(2, { category_id: 4, category: { id: 4, name: 'Cafe', icon: 'Coffee', color: '#654321' } }),
+        geo(3, { category_id: null, category: null }),
+      ],
+    })
+
+    const { result } = await renderPlanner()
+
+    expect(result.current.mapPlaces.map(({ category_name, category_icon, category_color }) =>
+      ({ category_name, category_icon, category_color }))).toEqual([
+      { category_name: 'Museum', category_icon: 'Landmark', category_color: '#123456' },
+      { category_name: 'Cafe', category_icon: 'Coffee', category_color: '#654321' },
+      { category_name: null, category_icon: null, category_color: null },
+    ])
+
+    act(() => { useTripStore.setState({ categories: [buildCategory({ ...museum, icon: 'Library', color: '#abcdef' })] }) })
+    expect(result.current.mapPlaces[0]).toMatchObject({ category_icon: 'Library', category_color: '#abcdef' })
+  })
 
   it('FE-TP-HOOK-025: places without coordinates never reach the map', async () => {
     seedTrip({ places: [geo(1), buildPlace({ id: 2, lat: null, lng: null })] })

@@ -864,6 +864,12 @@ describe('MapView hover card', () => {
 describe('MapView live location', () => {
   const fix = (over: Record<string, any> = {}) => ({ lat: 48.2, lng: 16.37, accuracy: 25, heading: null, ...over })
 
+  it('uses the Trip page geolocation when supplied', () => {
+    const external = { ...geoMock, mode: 'show' as const, position: fix() }
+    render(<MapView geolocation={external} />)
+    expect(screen.getByTestId('circle-marker')).toBeTruthy()
+  })
+
   it('FE-COMP-MAPVIEW-058: no fix means no dot, circle or heading cone', () => {
     render(<MapView />)
     expect(screen.queryByTestId('circle-marker')).toBeNull()

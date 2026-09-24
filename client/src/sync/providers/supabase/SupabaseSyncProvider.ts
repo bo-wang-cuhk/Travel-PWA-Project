@@ -9,6 +9,8 @@ const TABLE_BY_ENTITY: Record<SyncEntityType, string> = {
   category: 'category_records',
   collection: 'collection_records',
   collectionPlace: 'collection_place_records',
+  journey: 'journey_records',
+  journeyEntry: 'journey_entry_records',
   place: 'places',
   assignment: 'assignments',
   accommodation: 'accommodations',

@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react'
+import { useGeolocation, type UseGeolocationReturn } from '../../../hooks/useGeolocation'
+import TripVisitAssistance from '../../../components/Planner/TripVisitAssistance'
 import { findFocusDayId } from '../../../components/Planner/today'
 import {
   CalendarDays, ChevronDown, ChevronLeft, Download, FileDown, List, Map as MapIcon, MoreHorizontal, PackageCheck,
@@ -58,6 +60,7 @@ export interface MTripSheetState {
  * state (view/mode machine, active tab, sheet routing, header sub-states).
  */
 export interface MTripShellApi {
+  geolocation?: UseGeolocationReturn
   /** 'plan' = list chrome, 'map' = fullscreen map. Plan tab only. */
   view: MTripView
   /** Travel/Plan/Places segment: go | edit | browse. */
@@ -198,6 +201,7 @@ export default function MTripShell({
   const [exportCostsCsvSignal, setExportCostsCsvSignal] = useState(0)
   const [uploadFilesSignal, setUploadFilesSignal] = useState(0)
   const [openFilesTrashSignal, setOpenFilesTrashSignal] = useState(0)
+  const geolocation = useGeolocation()
 
   // The mobile plan is single-day: make sure a day is active once days arrive.
   // Only seed once so an intentional deselect elsewhere is not fought. Open on
@@ -327,6 +331,7 @@ export default function MTripShell({
   const closeSheet = () => setSheet(null)
 
   const shell: MTripShellApi = {
+    geolocation,
     view, mode, trTab, setTrTab, setTravelMode, toggleView, browseFromEdit,
     sheet, openSheet, closeSheet,
     listsTab, setListsTab, collabTab, setCollabTab,
@@ -357,6 +362,7 @@ export default function MTripShell({
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-[color:var(--m-bg)] bg-[image:var(--m-scr)] text-m-ink">
+      <TripVisitAssistance key={trip.id} trip={trip} places={planner.places} position={geolocation.mode === 'off' ? null : geolocation.position} canEdit={planner.can('place_edit', trip)} mobile onUpdate={(placeId, status) => planner.tripActions.updatePlace(tripId, placeId, { visit_status: status })} />
       {/* ── Content layers ─────────────────────────────────────────────── */}
       {trTab === 'plan' && (
         <div className="absolute inset-0">

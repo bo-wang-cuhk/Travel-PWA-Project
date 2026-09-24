@@ -1,6 +1,14 @@
 import type { TranslationStrings } from '../types';
 
 const places: TranslationStrings = {
+  'places.visitPlanned': 'Planlandı',
+  'places.visitVisited': 'Ziyaret edildi',
+  'places.visitSkipped': 'Ziyaret edilmedi',
+  'places.maybeArrived': '“{name}” konumuna varmış gibi görünüyorsunuz',
+  'places.markVisited': 'Ziyaret edildi olarak işaretle',
+  'places.ignoreArrival': 'Yok say',
+  'places.unconfirmedCount': 'Bu gezide onaylanmayı bekleyen {count} yer var',
+  'places.reviewVisits': 'Ziyaretleri gözden geçir',
   'places.addPlace': 'Yer/etkinlik Ekle',
   'places.importFile': 'Dosyayı içe aktar',
   'places.trackIndicator': 'İz / rota',

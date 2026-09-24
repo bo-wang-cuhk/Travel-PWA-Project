@@ -52,6 +52,8 @@ const AtlasPage = lazyWithRetry(() => import('./pages/AtlasPage'))
 const JourneyPage = lazyWithRetry(() => import('./pages/JourneyPage'))
 const JourneyDetailPage = lazyWithRetry(() => import('./pages/JourneyDetailPage'))
 const JourneyStudioPage = lazyWithRetry(() => import('./pages/JourneyStudioPage'))
+const LocalJourneyPage = lazyWithRetry(() => import('./pages/LocalJourneyPage'))
+const LocalJourneyDetailPage = lazyWithRetry(() => import('./pages/LocalJourneyDetailPage'))
 const CollectionsPage = lazyWithRetry(() => import('./pages/CollectionsPage'))
 const JourneyPublicPage = lazyWithRetry(() => import('./pages/JourneyPublicPage'))
 const SharedTripPage = lazyWithRetry(() => import('./pages/SharedTripPage'))
@@ -439,7 +441,7 @@ export default function App() {
           <Route path="/" element={<RootRedirect />} />
           <Route path="/login" element={<PublicRoute redirectAuthed><LoginPage /></PublicRoute>} />
           <Route path="/shared/:token" element={<PublicRoute><SharedTripPage /></PublicRoute>} />
-          <Route path="/public/journey/:token" element={<PublicRoute><JourneyPublicPage /></PublicRoute>} />
+          <Route path="/public/journey/:token" element={STANDALONE_MODE ? <Navigate to="/journey" replace /> : <PublicRoute><JourneyPublicPage /></PublicRoute>} />
           <Route path="/register" element={<PublicRoute redirectAuthed><LoginPage /></PublicRoute>} />
           <Route path="/forgot-password" element={<PublicRoute><ForgotPasswordPage /></PublicRoute>} />
           <Route path="/reset-password" element={<PublicRoute><ResetPasswordPage /></PublicRoute>} />
@@ -548,7 +550,7 @@ export default function App() {
             path="/journey"
             element={
               <ProtectedRoute addonId="journey">
-                <ViewportRoute phone={MJourneyScreen} desktop={JourneyPage} />
+                {STANDALONE_MODE ? <LocalJourneyPage /> : <ViewportRoute phone={MJourneyScreen} desktop={JourneyPage} />}
               </ProtectedRoute>
             }
           />
@@ -556,14 +558,14 @@ export default function App() {
             path="/journey/:id"
             element={
               <ProtectedRoute addonId="journey">
-                <ViewportRoute phone={MJourneyDetailScreen} desktop={JourneyDetailPage} />
+                {STANDALONE_MODE ? <LocalJourneyDetailPage /> : <ViewportRoute phone={MJourneyDetailScreen} desktop={JourneyDetailPage} />}
               </ProtectedRoute>
             }
           >
             {/* Studio is nested so the journey stays mounted underneath it and
                 shows through the panel's margin — it is opened on top of the
                 journey, not navigated away to. */}
-            <Route path="studio" element={<JourneyStudioPage />} />
+            {!STANDALONE_MODE && <Route path="studio" element={<JourneyStudioPage />} />}
           </Route>
           <Route
             path="/collections"

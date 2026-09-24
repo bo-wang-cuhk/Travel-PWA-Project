@@ -47,6 +47,8 @@ import { useTripPlanner } from './tripPlanner/useTripPlanner'
 import { usePoiExplore } from '../components/Map/usePoiExplore'
 import PoiCategoryPill from '../components/Map/PoiCategoryPill'
 import { useTouchDragBridge } from '../hooks/useTouchDragBridge'
+import { useGeolocation } from '../hooks/useGeolocation'
+import TripVisitAssistance from '../components/Planner/TripVisitAssistance'
 
 // The tab panels are the planner's dead weight: each one mounts only while its
 // own tab is active, so the page chunk carried code most sessions never run. They
@@ -234,6 +236,7 @@ export default function TripPlannerPage(): React.ReactElement | null {
 }
 
 function TripPlannerPageDesktop(): React.ReactElement | null {
+  const geolocation = useGeolocation()
   // Page = wiring container: the entire planner state machine (store, tabs,
   // selection, CRUD handlers with undo, map filters, splash) lives in the hook.
   const {
@@ -339,6 +342,8 @@ function TripPlannerPageDesktop(): React.ReactElement | null {
     <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', ...fontStyle }}>
       <Navbar tripTitle={trip.title} tripId={tripId} showBack onBack={() => navigate('/dashboard')} onShare={() => setShowMembersModal(true)} />
 
+      <TripVisitAssistance key={trip.id} trip={trip} places={places} position={geolocation.mode === 'off' ? null : geolocation.position} canEdit={can('place_edit', trip)} onUpdate={(placeId, status) => tripActions.updatePlace(tripId, placeId, { visit_status: status })} />
+
       <div className="bg-surface-elevated border-b border-edge-faint" style={{
         position: 'fixed', top: 'var(--nav-h)', left: 0, right: 0, zIndex: 40,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -404,6 +409,7 @@ function TripPlannerPageDesktop(): React.ReactElement | null {
               onPoiClick={openAddPlaceFromPoi}
               onViewportChange={poi.onViewportChange}
               onMapReady={setGlMap}
+              geolocation={geolocation}
             />
 
             {(poiPillEnabled || glMap) && (

@@ -15,6 +15,7 @@ import type { LocalTripFileRecord, StoredTripFileRecord } from '../domain/tripFi
 import type { LocalAtlasRecord } from '../domain/atlasSyncModel';
 import type { LocalCategoryRecord, StoredCategoryRecord } from '../domain/categorySyncModel';
 import type { LocalCollectionPlaceRecord, LocalCollectionRecord } from '../domain/collectionSyncModel';
+import type { LocalJourneyRecord, LocalJourneyEntryRecord } from '../domain/journeySyncModel';
 import type { HolidayCacheRecord } from '../services/holiday/types';
 import type {
   EntitySyncMetaRecord,
@@ -124,6 +125,20 @@ export interface AppMeta {
   value: string;
 }
 
+export interface PlaceDetailsCache {
+  placeId: string;
+  rating?: number;
+  ratingCount?: number;
+  openingHours?: string;
+  phone?: string;
+  website?: string;
+  photoUrl?: string;
+  description?: string;
+  provider: 'baidu' | 'google' | 'osm';
+  providerPlaceId: string;
+  fetchedAt: string;
+}
+
 export interface TripFileBlobRecord {
   syncId: string;
   blob: Blob;
@@ -192,11 +207,14 @@ class TrekOfflineDb extends Dexie {
   categories!: Table<StoredCategoryRecord, number>;
   collections!: Table<LocalCollectionRecord, number>;
   collectionPlaces!: Table<LocalCollectionPlaceRecord, number>;
+  journeys!: Table<LocalJourneyRecord, number>;
+  journeyEntries!: Table<LocalJourneyEntryRecord, number>;
   mutationQueue!: Table<QueuedMutation, string>;
   syncMeta!: Table<SyncMeta, number>;
   blobCache!: Table<BlobCacheEntry, string>;
   importFiles!: Table<ImportSourceFile, [string, string]>;
   appMeta!: Table<AppMeta, string>;
+  placeDetailsCache!: Table<PlaceDetailsCache, string>;
   syncOutbox!: Table<SyncOutboxRecord, string>;
   entitySyncMeta!: Table<EntitySyncMetaRecord, string>;
   syncState!: Table<SyncStateRecord, string>;
@@ -744,6 +762,17 @@ class TrekOfflineDb extends Dexie {
       collections: 'id, &sync_id, deleted_at, updated_at, sort_order',
       collectionPlaces: 'id, &sync_id, collection_id, collection_sync_id, source_place_id, deleted_at, updated_at',
     });
+    this.version(22).stores({
+      journeys: 'id, &sync_id, deleted_at, local_updated_at',
+      journeyEntries: 'id, &sync_id, journey_id, journey_sync_id, deleted_at, local_updated_at',
+    });
+    this.version(23).stores({}).upgrade(async tx => {
+      await tx.table('places').toCollection().modify(place => {
+        if (!place.visit_status) place.visit_status = 'planned';
+      });
+    });
+    // Provider POI facts are local, short-lived cache data; they never enter sync.
+    this.version(24).stores({ placeDetailsCache: 'placeId, provider, fetchedAt' });
   }
 }
 

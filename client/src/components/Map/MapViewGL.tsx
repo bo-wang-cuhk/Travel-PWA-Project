@@ -17,6 +17,7 @@ import { escapeHtml } from '@trek/shared'
 import { MAPBOX_DEFAULT_STYLE, styleForActiveProvider, basemapLanguage, type GlMapProvider } from './glProviders'
 import LocationButton from './LocationButton'
 import { useGeolocation } from '../../hooks/useGeolocation'
+import type { UseGeolocationReturn } from '../../hooks/useGeolocation'
 import type { Day, Place, Reservation, RouteVia } from '../../types'
 import { POI_CATEGORY_BY_KEY, type Poi } from './poiCategories'
 import { resolveTrackColor, hasManualTrackColor } from './trackColors'
@@ -132,6 +133,7 @@ interface Props {
   gl: any
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onMapReady?: (map: any | null) => void
+  geolocation?: UseGeolocationReturn
 }
 
 function createMarkerElement(place: Place & { category_color?: string; category_icon?: string }, photoUrl: string | null, orderNumbers: number[] | null, selected: boolean): HTMLDivElement {
@@ -438,6 +440,7 @@ export function MapViewGL({
   glProvider = 'mapbox-gl',
   gl,
   onMapReady,
+  geolocation,
 }: Props) {
   const rawMapboxStyle = useSettingsStore(s => s.settings.mapbox_style || MAPBOX_DEFAULT_STYLE)
   const rawMaplibreStyle = useSettingsStore(s => s.settings.maplibre_style || '')
@@ -509,7 +512,8 @@ export function MapViewGL({
   onViewportChangeRef.current = onViewportChange
   const onMapReadyRef = useRef(onMapReady)
   onMapReadyRef.current = onMapReady
-  const { position: userPosition, mode: trackingMode, error: trackingError, errorCode: trackingErrorCode, cycleMode: cycleTrackingMode, setMode: setTrackingMode } = useGeolocation()
+  const localGeolocation = useGeolocation()
+  const { position: userPosition, mode: trackingMode, error: trackingError, errorCode: trackingErrorCode, cycleMode: cycleTrackingMode, setMode: setTrackingMode } = geolocation ?? localGeolocation
   const onClickRefs = useRef({ marker: onMarkerClick, map: onMapClick, context: onMapContextMenu })
   onClickRefs.current.marker = onMarkerClick
   onClickRefs.current.map = onMapClick

@@ -1,6 +1,14 @@
 import type { TranslationStrings } from '../types';
 
 const places: TranslationStrings = {
+  'places.visitPlanned': 'Plánováno',
+  'places.visitVisited': 'Navštíveno',
+  'places.visitSkipped': 'Nenavštíveno',
+  'places.maybeArrived': 'Zdá se, že jste dorazili na místo „{name}“',
+  'places.markVisited': 'Označit jako navštívené',
+  'places.ignoreArrival': 'Ignorovat',
+  'places.unconfirmedCount': 'V této cestě zbývá potvrdit {count} míst',
+  'places.reviewVisits': 'Zkontrolovat návštěvy',
   'places.addPlace': 'Přidat místo/aktivitu',
   'places.importFile': 'Importovat soubor',
   'places.trackIndicator': 'Trasa',

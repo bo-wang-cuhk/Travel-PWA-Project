@@ -7,6 +7,7 @@ import { dayNoteRepo } from '../repo/dayNoteRepo'
 import { placeRepo } from '../repo/placeRepo'
 import { categoryRepo } from '../repo/categoryRepo'
 import { collectionRepo } from '../repo/collectionRepo'
+import { journeyRepo } from '../repo/journeyRepo'
 import { assignmentRepo } from '../repo/assignmentRepo'
 import { accommodationRepo } from '../repo/accommodationRepo'
 import { reservationRepo } from '../repo/reservationRepo'
@@ -88,6 +89,19 @@ class LastWriteWinsProvider extends MemoryProvider {
 beforeEach(async () => { await clearAll() })
 
 describe('local-first SyncManager', () => {
+  it('restores a journey and its text entries on another device with stable trip links', async () => {
+    const provider = new LastWriteWinsProvider()
+    const trip = (await tripRepo.create({ title: 'Seoul', day_count: 1 })).trip
+    const journey = await journeyRepo.create({ title: 'Seoul notes', trip_ids: [trip.id] })
+    await journeyRepo.createEntry(journey.id, { title: 'Arrival', story: 'A good day', entry_date: '2026-10-01' })
+    await new SyncManager(provider).sync()
+    await clearAll()
+    await new SyncManager(provider).sync()
+    const restored = (await journeyRepo.list()).journeys[0]
+    const detail = await journeyRepo.get(restored.id)
+    expect(detail.trips.map(value => value.title)).toEqual(['Seoul'])
+    expect(detail.entries.map(value => value.story)).toEqual(['A good day'])
+  })
   it('pushes a personal Atlas document and restores it on a fresh device', async () => {
     const provider = new LastWriteWinsProvider()
     const owner = '22222222-2222-4222-8222-222222222222'

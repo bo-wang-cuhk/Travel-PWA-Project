@@ -1,6 +1,14 @@
 import type { TranslationStrings } from '../types';
 
 const places: TranslationStrings = {
+  'places.visitPlanned': 'Đã lên kế hoạch',
+  'places.visitVisited': 'Đã ghé thăm',
+  'places.visitSkipped': 'Không ghé thăm',
+  'places.maybeArrived': 'Có vẻ bạn đã đến “{name}”',
+  'places.markVisited': 'Đánh dấu đã ghé thăm',
+  'places.ignoreArrival': 'Bỏ qua',
+  'places.unconfirmedCount': 'Chuyến đi này còn {count} địa điểm cần xác nhận',
+  'places.reviewVisits': 'Xem lại lượt ghé thăm',
   'places.addPlace': 'Thêm địa điểm/Hoạt động',
   'places.importFile': 'Nhập tập tin',
   'places.trackIndicator': 'Đường đi / tuyến đường',

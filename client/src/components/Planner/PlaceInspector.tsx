@@ -35,6 +35,8 @@ import { TRANSPORT_TYPES, getAssignmentReservations } from '../../utils/dayMerge
 import { NavigationMenu } from '../shared/NavigationMenu'
 import { resolveOpenNow, resolvePlaceTimeZone, placeWeekdayIndex } from './placeOpenState'
 import { convertHoursLine } from './placeHoursFormat'
+import { STANDALONE_MODE } from '../../config/runtimeMode'
+import { useCachedPlaceDetails, type PlaceDetailsIdentity } from '../../services/placeDetails'
 
 const detailsCache = new Map()
 
@@ -191,7 +193,7 @@ export default function PlaceInspector({
   const navBtnRef = useRef<HTMLButtonElement>(null)
   const placeIdForDetails = mode === 'trip' ? place?.id : undefined
   useEffect(() => {
-    if (placeIdForDetails == null) { setProviderDetails([]); return }
+    if (STANDALONE_MODE || placeIdForDetails == null) { setProviderDetails([]); return }
     let cancelled = false
     pluginsApi.placeDetails(placeIdForDetails)
       .then((d) => { if (!cancelled) setProviderDetails((d.providers || []).filter((p) => Array.isArray(p.items) && p.items.length > 0)) })
@@ -215,7 +217,25 @@ export default function PlaceInspector({
   const [nameValue, setNameValue] = useState('')
   const nameInputRef = useRef(null)
   const fileInputRef = useRef(null)
-  const googleDetails = usePlaceDetails(place?.google_place_id, place?.osm_id, language)
+  const legacyDetails = usePlaceDetails(
+    STANDALONE_MODE ? null : place?.google_place_id,
+    STANDALONE_MODE ? null : place?.osm_id,
+    language,
+  )
+  const externalId = place?.external_place_id || place?.google_place_id || place?.osm_id
+  const source = place?.source === 'baidu' || place?.source === 'osm'
+    ? place.source : place?.source === 'google' || place?.google_place_id ? null : place?.osm_id ? 'osm' : null
+  const detailsIdentity: PlaceDetailsIdentity | null = STANDALONE_MODE && place && source && externalId
+    ? { placeId: String(place.id), provider: source, providerPlaceId: externalId } : null
+  const cachedDetails = useCachedPlaceDetails(detailsIdentity, language)
+  const googleDetails = STANDALONE_MODE ? (cachedDetails && {
+    rating: cachedDetails.rating,
+    rating_count: cachedDetails.ratingCount,
+    opening_hours: cachedDetails.openingHours?.split('\n'),
+    phone: cachedDetails.phone,
+    website: cachedDetails.website,
+    summary: cachedDetails.description,
+  }) : legacyDetails
 
   // Library-wide "is this place already saved anywhere I can see?" indicator for
   // the trip-planner footer bookmark. Re-checks when the place changes or after
@@ -364,7 +384,7 @@ export default function PlaceInspector({
         flexDirection: 'column',
       }}>
         {/* Header */}
-        <PlaceInspectorHeader openNow={openNow} place={place} category={category} t={t} editingName={editingName}
+        <PlaceInspectorHeader openNow={openNow} place={cachedDetails?.photoUrl && !place.image_url ? { ...place, image_url: cachedDetails.photoUrl } : place} category={category} t={t} editingName={editingName}
           nameInputRef={nameInputRef} nameValue={nameValue} setNameValue={setNameValue} commitNameEdit={commitNameEdit}
           handleNameKeyDown={handleNameKeyDown} startNameEdit={startNameEdit} onUpdatePlace={onUpdatePlace}
           onUploadImage={mode === 'trip' && onUpdatePlace ? onUploadImage : undefined}
@@ -372,6 +392,10 @@ export default function PlaceInspector({
 
         {/* Content — scrollable */}
         <div data-testid="inspector-scroll" style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+
+          {cachedDetails && <span className="text-content-faint" style={{ fontSize: 10 }}>
+            {cachedDetails.provider === 'osm' ? 'OpenStreetMap' : 'Baidu'}
+          </span>}
 
           {/* Info-Chips — hidden on mobile, shown on desktop */}
           <div className="hidden sm:flex" style={{ flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
@@ -1012,7 +1036,7 @@ function PlaceExtras({ openingHours, weekdayIndex, hoursExpanded, setHoursExpand
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Clock size={13} color="#9ca3af" />
                   <span className="text-content-secondary" style={{ fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontWeight: 500 }}>
-                    {hoursExpanded ? t('inspector.openingHours') : (convertHoursLine(openingHours[weekdayIndex] || '', timeFormat) || t('inspector.showHours'))}
+                    {hoursExpanded ? t('inspector.openingHours') : (convertHoursLine(openingHours[weekdayIndex] || openingHours[0] || '', timeFormat) || t('inspector.showHours'))}
                   </span>
                 </div>
                 {hoursExpanded ? <ChevronUp size={13} color="#9ca3af" /> : <ChevronDown size={13} color="#9ca3af" />}

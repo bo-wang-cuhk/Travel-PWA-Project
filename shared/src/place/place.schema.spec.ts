@@ -25,6 +25,18 @@ describe('placeSchema route_color (#776)', () => {
   });
 });
 
+describe('place visit status', () => {
+  const place = { id: 1, trip_id: 1, name: 'Walk' };
+
+  it('accepts old places and the three visit statuses', () => {
+    expect(placeSchema.safeParse(place).success).toBe(true);
+    for (const visit_status of ['planned', 'visited', 'skipped']) {
+      expect(placeSchema.safeParse({ ...place, visit_status }).success).toBe(true);
+    }
+    expect(placeSchema.safeParse({ ...place, visit_status: 'unknown' }).success).toBe(false);
+  });
+});
+
 describe('placeCreateRequestSchema', () => {
   it('requires a name and keeps the other place fields open', () => {
     expect(

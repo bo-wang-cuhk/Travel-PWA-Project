@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import {
   Bookmark, Camera, ChevronRight, ExternalLink, Loader2, Map as MapIcon, Navigation, Paperclip,
-  Pencil, Phone, Plus, Route, Trash2, Upload, X,
+  Pencil, Phone, Plus, Route, Trash2, Upload, X, Clock, Star,
 } from 'lucide-react'
 import MSheet from '../../../components/MSheet'
 import type { MTripSheetsProps } from '../MTripShell'
@@ -25,6 +25,8 @@ import { NavigationMenu } from '../../../../components/shared/NavigationMenu'
 import { getAssignmentReservations } from '../../../../utils/dayMerge'
 import type { Assignment, Day, Reservation, TripMember } from '../../../../types'
 import { ActionCircle, Eyebrow, INNER_CLS } from './MTripSheetUi'
+import { useCachedPlaceDetails, type PlaceDetailsIdentity } from '../../../../services/placeDetails'
+import { STANDALONE_MODE } from '../../../../config/runtimeMode'
 
 /**
  * Place inspector sheet (glass card), opened by the current place selection —
@@ -34,9 +36,17 @@ import { ActionCircle, Eyebrow, INNER_CLS } from './MTripSheetUi'
  * attached files, plus the inspector action row.
  */
 export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
-  const { t } = useTranslation()
+  const { t, language, locale } = useTranslation()
   const place = planner.selectedPlace ?? null
   const open = !!place
+  const source = place?.source === 'baidu' || place?.source === 'osm'
+    ? place.source : place?.source === 'google' || place?.google_place_id ? null : place?.osm_id ? 'osm' : null
+  const externalId = place?.external_place_id || place?.google_place_id || place?.osm_id
+  const detailIdentity: PlaceDetailsIdentity | null = STANDALONE_MODE && place && source && externalId
+    ? { placeId: String(place.id), provider: source, providerPlaceId: externalId } : null
+  const externalDetails = useCachedPlaceDetails(detailIdentity, language)
+  const website = safeHttpUrl(place?.website) || safeHttpUrl(externalDetails?.website)
+  const displayImage = place?.image_url || externalDetails?.photoUrl
 
   const canEditPlaces = planner.can('place_edit', planner.trip)
   const canEditDays = planner.can('day_edit', planner.trip)
@@ -254,10 +264,10 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
             <div className="flex items-start gap-3">
               <div className="flex flex-none flex-col items-center gap-[5px]">
                 <div className="relative h-[52px] w-[52px]">
-                  {place.image_url ? (
+                  {displayImage ? (
                     <div
                       className="h-[52px] w-[52px] rounded-[16px] border-[1.5px] border-[color:var(--m-avbr)] bg-cover bg-center"
-                      style={{ backgroundImage: `url('${place.image_url}')` }}
+                      style={{ backgroundImage: `url('${displayImage}')` }}
                     />
                   ) : (
                     <div className="flex h-[52px] w-[52px] items-center justify-center rounded-[16px] border-[1.5px] border-[color:var(--m-avbr)] bg-[color:var(--m-ic)]">
@@ -318,21 +328,32 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-[18px] pb-[18px]">
-            {place.phone && (
-              <a href={`tel:${place.phone}`} className="mt-3 flex items-center gap-[7px] text-[0.78125rem] font-medium">
+            {externalDetails && <div className="mt-2 text-[0.625rem] text-m-muted">
+              {externalDetails.provider === 'osm' ? 'OpenStreetMap' : 'Baidu'}
+            </div>}
+            {(place.phone || externalDetails?.phone) && (
+              <a href={`tel:${place.phone || externalDetails?.phone}`} className="mt-3 flex items-center gap-[7px] text-[0.78125rem] font-medium">
                 <Phone size={13} strokeWidth={2} className="flex-none text-m-muted" />
-                {place.phone}
+                {place.phone || externalDetails?.phone}
               </a>
             )}
+
+            {externalDetails?.rating != null && <div className="mt-3 flex items-center gap-2 text-[0.78125rem] text-m-muted">
+              <Star size={13} fill="#facc15" color="#facc15" />
+              {externalDetails.rating.toFixed(1)}{externalDetails.ratingCount != null && ` (${externalDetails.ratingCount.toLocaleString(locale)})`}
+            </div>}
+            {externalDetails?.openingHours && <div className="mt-3 flex items-start gap-2 text-[0.78125rem] text-m-muted">
+              <Clock size={13} className="mt-0.5 flex-none" /><span className="whitespace-pre-line">{externalDetails.openingHours}</span>
+            </div>}
 
             {/* Collaborative rating (#1435) — tap a star to cast/clear your vote. */}
             <div className={`mt-[10px] rounded-[14px] px-3 py-[10px] ${INNER_CLS}`}>
               <PlaceRating ratings={place.ratings ?? []} ratingAvg={place.rating_avg} onRate={handleRate} size={18} />
             </div>
 
-            {place.description && (
+            {(place.description || externalDetails?.description) && (
               <div className={`mt-[10px] rounded-[14px] px-3 py-[10px] ${INNER_CLS}`}>
-                <div className="font-geist text-[0.75rem] leading-[1.5] text-m-muted">{place.description}</div>
+                <div className="font-geist text-[0.75rem] leading-[1.5] text-m-muted">{place.description || externalDetails?.description}</div>
               </div>
             )}
 
@@ -617,9 +638,9 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
                   <MapIcon size={15} strokeWidth={2} />
                 </ActionCircle>
               )}
-              {safeHttpUrl(place.website) && (
+              {website && (
                 <ActionCircle
-                  onClick={() => window.open(safeHttpUrl(place.website)!, '_blank', 'noopener,noreferrer')}
+                  onClick={() => window.open(website, '_blank', 'noopener,noreferrer')}
                   label={t('inspector.website')}
                 >
                   <ExternalLink size={15} strokeWidth={2} />

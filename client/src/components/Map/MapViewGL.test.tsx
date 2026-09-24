@@ -1313,6 +1313,14 @@ describe('MapViewGL', () => {
     expect(glMap.easeTo).toHaveBeenCalledWith({ center: [2.35, 48.86], bearing: 90, zoom: 16, duration: 350 })
   })
 
+  it('uses the Trip page geolocation when supplied', async () => {
+    const position: GeoPosition = { lat: 48.86, lng: 2.35, accuracy: 12, heading: null, speed: null, timestamp: 1 }
+    const external = { ...geoStub, position, mode: 'show' as TrackingMode }
+    render(<MapViewGL places={[]} fitKey={1} geolocation={external} />)
+    await act(async () => {})
+    expect(locationMarker.update).toHaveBeenCalledWith(position)
+  })
+
   it('FE-COMP-MAPVIEWGL-040: the dot waits for the style, follows tracking changes and is destroyed on unmount', async () => {
     glMap.loaded.mockReturnValue(false)
     geoStub.position = { lat: 48.86, lng: 2.35, accuracy: 12, heading: null, speed: null, timestamp: 1 }

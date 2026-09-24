@@ -25,9 +25,11 @@ export function useContextMenu() {
     setMenu({ x: e.clientX, y: e.clientY, items })
   }
 
+  const openAt = (x: number, y: number, items: MenuItem[]) => setMenu({ x, y, items })
+
   const close = () => setMenu(null)
 
-  return { menu, open, close }
+  return { menu, open, openAt, close }
 }
 
 interface ContextMenuProps {

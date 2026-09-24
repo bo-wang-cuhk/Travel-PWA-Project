@@ -5,6 +5,8 @@ import { randomId } from '../utils/randomId'
 import { STANDALONE_MODE } from '../config/runtimeMode'
 import { placeSearch } from '../services/placeSearch'
 import { categoryRepo } from '../repo/categoryRepo'
+import { journeyRepo } from '../repo/journeyRepo'
+import type { Journey, JourneyEntry } from '../store/journeyStore'
 import {
   weatherResultSchema, type WeatherResult,
   inAppListResultSchema, type InAppListResult,
@@ -942,23 +944,23 @@ export const airtrailApi = {
 }
 
 export const journeyApi = {
-  list: () => apiClient.get('/journeys').then(r => r.data),
-  create: (data: JourneyCreateRequest) => apiClient.post('/journeys', data).then(r => r.data),
-  get: (id: number) => apiClient.get(`/journeys/${id}`).then(r => r.data),
-  update: (id: number, data: Record<string, unknown>) => apiClient.patch(`/journeys/${id}`, data).then(r => r.data),
-  delete: (id: number) => apiClient.delete(`/journeys/${id}`).then(r => r.data),
+  list: () => STANDALONE_MODE ? journeyRepo.list() : apiClient.get('/journeys').then(r => r.data),
+  create: (data: JourneyCreateRequest) => STANDALONE_MODE ? journeyRepo.create(data as { title: string; subtitle?: string; trip_ids?: number[] }) : apiClient.post('/journeys', data).then(r => r.data),
+  get: (id: number) => STANDALONE_MODE ? journeyRepo.get(id) : apiClient.get(`/journeys/${id}`).then(r => r.data),
+  update: (id: number, data: Record<string, unknown>) => STANDALONE_MODE ? journeyRepo.update(id, data as Partial<Journey>) : apiClient.patch(`/journeys/${id}`, data).then(r => r.data),
+  delete: (id: number) => STANDALONE_MODE ? journeyRepo.delete(id) : apiClient.delete(`/journeys/${id}`).then(r => r.data),
 
-  suggestions: () => apiClient.get('/journeys/suggestions').then(r => r.data),
-  availableTrips: () => apiClient.get('/journeys/available-trips').then(r => r.data),
+  suggestions: () => STANDALONE_MODE ? journeyRepo.suggestions() : apiClient.get('/journeys/suggestions').then(r => r.data),
+  availableTrips: () => STANDALONE_MODE ? journeyRepo.availableTrips() : apiClient.get('/journeys/available-trips').then(r => r.data),
 
   // Trips (sync sources)
-  addTrip: (id: number, tripId: number) => apiClient.post(`/journeys/${id}/trips`, { trip_id: tripId } satisfies JourneyAddTripRequest).then(r => r.data),
-  removeTrip: (id: number, tripId: number) => apiClient.delete(`/journeys/${id}/trips/${tripId}`).then(r => r.data),
+  addTrip: (id: number, tripId: number) => STANDALONE_MODE ? journeyRepo.addTrip(id, tripId) : apiClient.post(`/journeys/${id}/trips`, { trip_id: tripId } satisfies JourneyAddTripRequest).then(r => r.data),
+  removeTrip: (id: number, tripId: number) => STANDALONE_MODE ? journeyRepo.removeTrip(id, tripId) : apiClient.delete(`/journeys/${id}/trips/${tripId}`).then(r => r.data),
 
   // Entries
-  listEntries: (id: number) => apiClient.get(`/journeys/${id}/entries`).then(r => r.data),
+  listEntries: (id: number) => STANDALONE_MODE ? journeyRepo.get(id).then(j => ({ entries: j.entries })) : apiClient.get(`/journeys/${id}/entries`).then(r => r.data),
   // GPX tracks of the trips this journey's entries came from (#1260).
-  listTracks: (id: number): Promise<JourneyTracksResponse> => apiClient.get(`/journeys/${id}/tracks`).then(r => r.data),
+  listTracks: (id: number): Promise<JourneyTracksResponse> => STANDALONE_MODE ? Promise.resolve({ tracks: [] }) : apiClient.get(`/journeys/${id}/tracks`).then(r => r.data),
   // What the journey adds up to — distance, days, countries, the route (#1973).
   // Read by TREK Studio, which freezes the answer into the book document.
   stats: (id: number): Promise<JourneyStats> => apiClient.get(`/journeys/${id}/stats`).then(r => r.data),
@@ -973,10 +975,10 @@ export const journeyApi = {
     apiClient.put(`/journeys/${id}/book`, body).then(r => r.data),
   deleteBook: (id: number): Promise<void> =>
     apiClient.delete(`/journeys/${id}/book`).then(r => r.data),
-  createEntry: (id: number, data: Record<string, unknown>) => apiClient.post(`/journeys/${id}/entries`, data).then(r => r.data),
-  updateEntry: (entryId: number, data: Record<string, unknown>) => apiClient.patch(`/journeys/entries/${entryId}`, data).then(r => r.data),
-  deleteEntry: (entryId: number) => apiClient.delete(`/journeys/entries/${entryId}`).then(r => r.data),
-  reorderEntries: (journeyId: number, orderedIds: number[]) => apiClient.put(`/journeys/${journeyId}/entries/reorder`, { orderedIds } satisfies JourneyReorderEntriesRequest).then(r => r.data),
+  createEntry: (id: number, data: Record<string, unknown>) => STANDALONE_MODE ? journeyRepo.createEntry(id, data as Partial<JourneyEntry>) : apiClient.post(`/journeys/${id}/entries`, data).then(r => r.data),
+  updateEntry: (entryId: number, data: Record<string, unknown>) => STANDALONE_MODE ? journeyRepo.updateEntry(entryId, data as Partial<JourneyEntry>) : apiClient.patch(`/journeys/entries/${entryId}`, data).then(r => r.data),
+  deleteEntry: (entryId: number) => STANDALONE_MODE ? journeyRepo.deleteEntry(entryId) : apiClient.delete(`/journeys/entries/${entryId}`).then(r => r.data),
+  reorderEntries: (journeyId: number, orderedIds: number[]) => STANDALONE_MODE ? journeyRepo.reorderEntries(journeyId, orderedIds) : apiClient.put(`/journeys/${journeyId}/entries/reorder`, { orderedIds } satisfies JourneyReorderEntriesRequest).then(r => r.data),
 
   // Photos
   uploadPhotos: (entryId: number, formData: FormData, opts?: UploadOptions) =>
@@ -998,12 +1000,12 @@ export const journeyApi = {
   uploadCover: (id: number, formData: FormData) => postMultipart(`/journeys/${id}/cover`, formData),
 
   // Contributors
-  addContributor: (id: number, userId: number, role: string) => apiClient.post(`/journeys/${id}/contributors`, { user_id: userId, role }).then(r => r.data),
-  updateContributor: (id: number, userId: number, role: string) => apiClient.patch(`/journeys/${id}/contributors/${userId}`, { role }).then(r => r.data),
-  removeContributor: (id: number, userId: number) => apiClient.delete(`/journeys/${id}/contributors/${userId}`).then(r => r.data),
+  addContributor: (id: number, userId: number, role: string) => STANDALONE_MODE ? journeyRepo.addContributor(id, userId, role === 'editor' ? 'editor' : 'viewer') : apiClient.post(`/journeys/${id}/contributors`, { user_id: userId, role }).then(r => r.data),
+  updateContributor: (id: number, userId: number, role: string) => STANDALONE_MODE ? journeyRepo.addContributor(id, userId, role === 'editor' ? 'editor' : 'viewer') : apiClient.patch(`/journeys/${id}/contributors/${userId}`, { role }).then(r => r.data),
+  removeContributor: (id: number, userId: number) => STANDALONE_MODE ? journeyRepo.removeContributor(id, userId) : apiClient.delete(`/journeys/${id}/contributors/${userId}`).then(r => r.data),
 
   // Preferences
-  updatePreferences: (id: number, data: { hide_skeletons?: boolean }) => apiClient.patch(`/journeys/${id}/preferences`, data).then(r => r.data),
+  updatePreferences: (id: number, data: { hide_skeletons?: boolean }) => STANDALONE_MODE ? Promise.resolve(data) : apiClient.patch(`/journeys/${id}/preferences`, data).then(r => r.data),
 
   // Share
   getShareLink: (id: number) => apiClient.get(`/journeys/${id}/share-link`).then(r => r.data),

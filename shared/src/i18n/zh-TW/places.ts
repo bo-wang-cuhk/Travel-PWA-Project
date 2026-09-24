@@ -1,6 +1,14 @@
 import type { TranslationStrings } from '../types';
 
 const places: TranslationStrings = {
+  'places.visitPlanned': '計畫中',
+  'places.visitVisited': '已造訪',
+  'places.visitSkipped': '未前往',
+  'places.maybeArrived': '你似乎抵達了「{name}」',
+  'places.markVisited': '標記為已造訪',
+  'places.ignoreArrival': '忽略',
+  'places.unconfirmedCount': '本次旅行還有 {count} 個地點待確認',
+  'places.reviewVisits': '確認造訪情況',
   'places.addPlace': '新增地點/活動',
   'places.importFile': '匯入檔案',
   'places.trackIndicator': '軌跡 / 路線',

@@ -274,6 +274,7 @@ function onTouchStart(e: TouchEvent): void {
   if (session) { endSession(false); return }
   if (e.touches.length !== 1) return
   const start = e.target as Element | null
+  if (start?.closest?.('[data-no-touch-drag]')) return
   const source = start?.closest?.('[draggable="true"]') as HTMLElement | null
   if (!source || !source.closest('[data-touch-drag]')) return
   const touch = e.touches[0]

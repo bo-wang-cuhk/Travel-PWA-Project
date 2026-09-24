@@ -20,6 +20,7 @@ export interface SyncedPlace {
   id: string
   tripId: string
   name: string
+  visitStatus?: NonNullable<Place['visit_status']>
   description: string | null
   lat: number | null
   lng: number | null
@@ -57,6 +58,7 @@ export function toSyncedPlace(place: LocalPlaceRecord): SyncedPlace {
     id: place.sync_id,
     tripId: place.trip_sync_id,
     name: place.name,
+    visitStatus: place.visit_status ?? 'planned',
     description: place.description ?? null,
     lat: place.lat ?? null,
     lng: place.lng ?? null,
@@ -96,6 +98,7 @@ export function applySyncedPlace(remote: SyncedPlace, localId: number, tripId: n
     trip_id: tripId,
     trip_sync_id: remote.tripId,
     name: remote.name,
+    visit_status: remote.visitStatus ?? 'planned',
     description: remote.description,
     lat: remote.lat,
     lng: remote.lng,

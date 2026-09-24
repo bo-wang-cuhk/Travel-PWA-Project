@@ -34,6 +34,7 @@ function asLocalPlace(place: StoredPlaceRecord, tripSyncId: string): LocalPlaceR
   const now = new Date().toISOString()
   return {
     ...place,
+    visit_status: place.visit_status ?? 'planned',
     sync_id: place.sync_id || randomId(),
     trip_sync_id: place.trip_sync_id || tripSyncId,
     created_at: place.created_at || now,
@@ -49,13 +50,13 @@ async function activePlaces(tripId: number): Promise<LocalPlaceRecord[]> {
 
 export const placeRepo = {
   async list(tripId: number | string, _params?: Record<string, unknown>): Promise<{ places: Place[] }> {
-    return { places: await activePlaces(Number(tripId)) }
+    return { places: (await activePlaces(Number(tripId))).map(place => ({ ...place, visit_status: place.visit_status ?? 'planned' })) }
   },
 
   async get(placeId: number | string): Promise<{ place: LocalPlaceRecord }> {
     const place = await offlineDb.places.get(Number(placeId))
     if (!place || place.deleted_at) throw new Error('Place not found in local database')
-    return { place: place as LocalPlaceRecord }
+    return { place: { ...place, visit_status: place.visit_status ?? 'planned' } as LocalPlaceRecord }
   },
 
   async create(tripId: number | string, data: Record<string, unknown> & { name: string }): Promise<{ place: LocalPlaceRecord }> {
@@ -72,6 +73,7 @@ export const placeRepo = {
         trip_id: localTripId,
         trip_sync_id: trip.sync_id,
         name: data.name,
+        visit_status: (data.visit_status as Place['visit_status']) ?? 'planned',
         ...category,
         created_at: now,
         updated_at: now,

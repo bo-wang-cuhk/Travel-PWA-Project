@@ -1,6 +1,14 @@
 import type { TranslationStrings } from '../types';
 
 const places: TranslationStrings = {
+  'places.visitPlanned': 'Tervezett',
+  'places.visitVisited': 'Meglátogatott',
+  'places.visitSkipped': 'Kihagyott',
+  'places.maybeArrived': 'Úgy tűnik, megérkeztél ide: „{name}”',
+  'places.markVisited': 'Megjelölés meglátogatottként',
+  'places.ignoreArrival': 'Mellőzés',
+  'places.unconfirmedCount': 'Az út során még {count} helyet kell megerősíteni',
+  'places.reviewVisits': 'Látogatások áttekintése',
   'places.addPlace': 'Hely/Tevékenység hozzáadása',
   'places.importFile': 'Fájl importálása',
   'places.trackIndicator': 'Nyomvonal / útvonal',

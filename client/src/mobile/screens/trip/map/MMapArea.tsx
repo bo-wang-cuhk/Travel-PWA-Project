@@ -74,6 +74,7 @@ export default function MMapArea({ planner, shell }: MMapAreaProps) {
         onPoiClick={marker => planner.openAddPlaceFromPoi(marker, planner.selectedDayId)}
         onViewportChange={poi.onViewportChange}
         onMapReady={setGlMap}
+        geolocation={shell.geolocation}
       />
 
       {/* Floating map chrome — only while the map view is front-most. The POI bar

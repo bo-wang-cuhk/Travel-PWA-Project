@@ -538,6 +538,7 @@ export const MapView = memo(function MapView({
   onViewportChange,
   tripId,
   routeVias = [],
+  geolocation,
 }: any) {
   // The caller hands over whatever the user configured; what kind of basemap
   // that is decides which layer draws it. A saved raster template still wins,
@@ -802,7 +803,8 @@ export const MapView = memo(function MapView({
   const TooltipOverlay = !hoverDisabled && hoveredPlace && tooltipPos && !isTouchDevice
   const CatIcon = TooltipOverlay ? getCategoryIcon(hoveredPlace.category_icon) : null
 
-  const { position: userPosition, mode: trackingMode, error: trackingError, errorCode: trackingErrorCode, cycleMode: cycleTrackingMode } = useGeolocation()
+  const localGeolocation = useGeolocation()
+  const { position: userPosition, mode: trackingMode, error: trackingError, errorCode: trackingErrorCode, cycleMode: cycleTrackingMode } = geolocation ?? localGeolocation
   // Desktop browsers only get IP-based geolocation (city-level accuracy),
   // so the button would be misleading. Mobile, where real GPS lives, keeps it.
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768

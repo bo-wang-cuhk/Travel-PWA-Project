@@ -78,10 +78,14 @@ export const placeRatingVoteSchema = z.object({
 });
 export type PlaceRatingVote = z.infer<typeof placeRatingVoteSchema>;
 
+export const placeVisitStatusSchema = z.enum(['planned', 'visited', 'skipped']);
+export type PlaceVisitStatus = z.infer<typeof placeVisitStatusSchema>;
+
 export const placeSchema = z.object({
   id: z.number(),
   trip_id: z.number(),
   name: z.string(),
+  visit_status: placeVisitStatusSchema.optional(),
   description: z.string().nullable().optional(),
   lat: z.number().nullable().optional(),
   lng: z.number().nullable().optional(),
@@ -130,6 +134,7 @@ export type Place = z.infer<typeof placeSchema>;
 export const assignmentPlaceSchema = z.object({
   id: z.number(),
   name: z.string(),
+  visit_status: placeVisitStatusSchema.optional(),
   description: z.string().nullable().optional(),
   lat: z.number().nullable().optional(),
   lng: z.number().nullable().optional(),

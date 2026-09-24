@@ -5,6 +5,8 @@ import { Plus, Check, Star } from 'lucide-react'
 import PlaceAvatar from '../shared/PlaceAvatar'
 import { getCategoryIcon } from '../shared/categoryIcons'
 import { resolveTrackColor } from '../Map/trackColors'
+import { PlaceVisitStatus } from './PlaceVisitStatus'
+import type { VisitStatus } from './placeVisitStatusModel'
 import type { Place, Category } from '../../types'
 
 interface MemoPlaceRowProps {
@@ -21,6 +23,8 @@ interface MemoPlaceRowProps {
   t: (key: string, params?: Record<string, any>) => string
   onPlaceClick: (id: number | null) => void
   onContextMenu: (e: React.MouseEvent, place: Place) => void
+  onVisitToggle: (place: Place) => void
+  onVisitMenu: (place: Place, x: number, y: number) => void
   onAssignToDay: (placeId: number, dayId?: number) => void
   toggleSelected: (id: number) => void
   setDayPickerPlace: (place: any) => void
@@ -30,7 +34,7 @@ interface MemoPlaceRowProps {
 export const MemoPlaceRow = React.memo(function MemoPlaceRow({
   place, category: cat, isSelected, isPlanned, inDay, isChecked,
   selectMode, selectedDayId, canEditPlaces, isMobile, t,
-  onPlaceClick, onContextMenu, onAssignToDay, toggleSelected, setDayPickerPlace, registerPlaceRow,
+  onPlaceClick, onContextMenu, onVisitToggle, onVisitMenu, onAssignToDay, toggleSelected, setDayPickerPlace, registerPlaceRow,
 }: MemoPlaceRowProps) {
   const hasGeometry = Boolean(place.route_geometry)
   // Touch is reached through a long press instead of being locked out (#1616).
@@ -74,6 +78,7 @@ export const MemoPlaceRow = React.memo(function MemoPlaceRow({
         background: isChecked ? 'color-mix(in srgb, var(--accent) 8%, transparent)' : isSelected ? 'var(--border-faint)' : 'transparent',
         borderBottom: '1px solid var(--border-faint)',
         transition: 'background 0.1s',
+        opacity: place.visit_status === 'skipped' ? 0.7 : 1,
         contentVisibility: 'auto',
         containIntrinsicSize: '0 52px',
       }}
@@ -144,6 +149,13 @@ export const MemoPlaceRow = React.memo(function MemoPlaceRow({
           ><Plus size={12} strokeWidth={2.5} /></button>
         )}
       </div>
+      {!selectMode && <PlaceVisitStatus
+        status={place.visit_status as VisitStatus | undefined}
+        canEdit={canEditPlaces}
+        t={t}
+        onToggle={() => onVisitToggle(place)}
+        onMenu={(x, y) => onVisitMenu(place, x, y)}
+      />}
     </div>
   )
 })

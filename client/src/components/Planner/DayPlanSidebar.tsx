@@ -56,6 +56,8 @@ import { TransitTitle, TransitLegChips, TransitItineraryInline } from './transit
 import { DayPlanSidebarFooter } from './DayPlanSidebarFooter'
 import type { Trip, Day, Place, Category, Assignment, Accommodation, Reservation, AssignmentsMap, RouteResult, RouteSegment, DayNote } from '../../types'
 import { getNavigationTargets, openNavigationTarget } from './placeNavigation'
+import { PlaceVisitStatus } from './PlaceVisitStatus'
+import { statusOptions, type VisitStatus } from './placeVisitStatusModel'
 
 interface DayPlanSidebarProps {
   tripId: number
@@ -182,6 +184,7 @@ function useDayPlanSidebar(props: DayPlanSidebarProps) {
   const tripActions = useRef(useTripStore.getState()).current
   const can = useCanDo()
   const canEditDays = can('day_edit', trip)
+  const canEditPlaces = can('place_edit', trip)
   // The calendar subscription hands out a link that reads the trip without an
   // account, so it sits behind the same permission as the public share link.
   const canManageShare = can('share_manage', trip)
@@ -1109,6 +1112,7 @@ function useDayPlanSidebar(props: DayPlanSidebarProps) {
     tripActions,
     can,
     canEditDays,
+    canEditPlaces,
     canManageShare,
     noteUi,
     setNoteUi,
@@ -1205,6 +1209,15 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
   // Per-day colours from the dayTintProvider hook — e.g. which leg of the trip a
   // day belongs to. Empty unless a granted plugin provides them.
   const dayTints = usePluginDayTints(S.tripId)
+  const placeById = useMemo(() => new Map(S.places.map(place => [place.id, place])), [S.places])
+  const setVisitStatus = (place: Place, status: VisitStatus) => {
+    if (!S.canEditPlaces || (place.visit_status ?? 'planned') === status) return
+    void S.tripActions.updatePlace(S.tripId, place.id, { visit_status: status }).catch(() => S.toast.error(S.t('common.error')))
+  }
+  const visitMenuItems = (place: Place) => S.canEditPlaces ? statusOptions.map(option => ({
+    label: S.t(option.key), icon: option.icon, onClick: () => setVisitStatus(place, option.value),
+  })) : []
+  const openVisitMenu = (place: Place, x: number, y: number) => S.ctxMenu.openAt(x, y, visitMenuItems(place))
   const routeProfileOptions = useMemo(() => {
     const opts: Array<{ key: string; label: string }> = [
       { key: 'driving', label: 'Driving' },
@@ -1280,6 +1293,7 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
     tripActions,
     can,
     canEditDays,
+    canEditPlaces,
     canManageShare,
     noteUi,
     setNoteUi,
@@ -1905,7 +1919,7 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
 
                       if (item.type === 'place') {
                         const assignment = item.data
-                        const place = assignment.place
+                        const place = placeById.get(assignment.place?.id) ?? assignment.place
                         if (!place) return null
                         const cat = categories.find(c => c.id === place.category_id)
                         const isPlaceSelected = selectedAssignmentId ? assignment.id === selectedAssignmentId : place.id === selectedPlaceId
@@ -2035,6 +2049,7 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
                               // does not exist here.
                               const navTargets = getNavigationTargets(place)
                               ctxMenu.open(e, [
+                                ...(canEditPlaces ? [...visitMenuItems(place), { divider: true }] : []),
                                 canEditDays && onEditPlace && { label: t('common.edit'), icon: Pencil, onClick: () => onEditPlace(place, assignment.id) },
                                 canEditDays && onRemoveAssignment && { label: t('planner.removeFromDay'), icon: Trash2, onClick: () => onRemoveAssignment(day.id, assignment.id) },
                                 safeHttpUrl(place.website) && { label: t('inspector.website'), icon: ExternalLink, onClick: () => window.open(safeHttpUrl(place.website)!, '_blank', 'noopener,noreferrer') },
@@ -2070,7 +2085,7 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
                                 : '3px solid transparent',
                               borderTop: showDropLine ? '2px solid var(--text-primary)' : undefined,
                               transition: 'background 0.15s, border-color 0.15s',
-                              opacity: isDraggingThis ? 0.4 : 1,
+                              opacity: isDraggingThis ? 0.4 : place.visit_status === 'skipped' ? 0.7 : 1,
                             }}
                           >
                             {canEditDays && !dragDisabled && <div className="dp-grip" style={{ flexShrink: 0, color: 'var(--text-faint)', display: 'flex', alignItems: 'center', opacity: 0.3, transition: 'opacity 0.15s', cursor: 'grab' }}>
@@ -2288,6 +2303,13 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
                                 <Plus size={11} strokeWidth={2} />
                               </button>
                             )}
+                            <PlaceVisitStatus
+                              status={place.visit_status}
+                              canEdit={canEditPlaces}
+                              t={t}
+                              onToggle={() => { if (place.visit_status !== 'skipped') setVisitStatus(place, place.visit_status === 'visited' ? 'planned' : 'visited') }}
+                              onMenu={(x, y) => openVisitMenu(place, x, y)}
+                            />
                           </div>
                           {daySchedule.byAssignment[day.id]?.[assignment.id]?.map(si => <PluginDayScheduleRow key={`${si.pluginId}:${si.id}`} item={si} />)}
                           {routeLegs[day.id]?.[assignment.id] && (canEditDays ? (

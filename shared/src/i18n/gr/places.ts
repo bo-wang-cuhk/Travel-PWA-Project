@@ -1,6 +1,14 @@
 import type { TranslationStrings } from '../types';
 
 const places: TranslationStrings = {
+  'places.visitPlanned': 'Προγραμματισμένο',
+  'places.visitVisited': 'Επισκέφθηκε',
+  'places.visitSkipped': 'Δεν επισκέφθηκε',
+  'places.maybeArrived': 'Φαίνεται πως έφτασες στο «{name}»',
+  'places.markVisited': 'Σήμανση ως επισκέφθηκε',
+  'places.ignoreArrival': 'Αγνόηση',
+  'places.unconfirmedCount': 'Απομένουν {count} μέρη σε αυτό το ταξίδι προς επιβεβαίωση',
+  'places.reviewVisits': 'Έλεγχος επισκέψεων',
   'places.addPlace': 'Προσθήκη Μέρους/Δραστηριότητας',
   'places.importFile': 'Εισαγωγή αρχείου',
   'places.trackIndicator': 'Ίχνος / διαδρομή',

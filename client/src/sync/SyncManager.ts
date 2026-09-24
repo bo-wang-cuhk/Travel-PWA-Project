@@ -14,6 +14,7 @@ import { applySyncedTrip, toSyncedTrip, type SyncedTrip } from '../domain/tripSy
 import { applySyncedTripFile, toSyncedTripFile, type LocalTripFileRecord, type SyncedTripFile } from '../domain/tripFileSyncModel'
 import { applySyncedCategory, toSyncedCategory, type LocalCategoryRecord, type SyncedCategory } from '../domain/categorySyncModel'
 import { applySyncedCollection, applySyncedCollectionPlace, toSyncedCollection, toSyncedCollectionPlace, type LocalCollectionPlaceRecord, type LocalCollectionRecord, type SyncedCollection, type SyncedCollectionPlace } from '../domain/collectionSyncModel'
+import { toSyncedJourney, toSyncedJourneyEntry, type LocalJourneyRecord, type LocalJourneyEntryRecord, type SyncedJourney, type SyncedJourneyEntry } from '../domain/journeySyncModel'
 import { syncEntityKey } from './localChangeRepository'
 import type { LocalChange, RemoteChange, SyncProvider, SyncStateRecord } from './types'
 
@@ -35,6 +36,8 @@ async function nextLocalPlaceId(): Promise<number> {
 async function nextLocalCategoryId(): Promise<number> { const first = await offlineDb.categories.orderBy('id').first(); return first && first.id < 0 ? first.id - 1 : -1 }
 async function nextLocalCollectionId(): Promise<number> { const first = await offlineDb.collections.orderBy('id').first(); return first && first.id < 0 ? first.id - 1 : -1 }
 async function nextLocalCollectionPlaceId(): Promise<number> { const first = await offlineDb.collectionPlaces.orderBy('id').first(); return first && first.id < 0 ? first.id - 1 : -1 }
+async function nextLocalJourneyId(): Promise<number> { const first = await offlineDb.journeys.orderBy('id').first(); return first && first.id < 0 ? first.id - 1 : -1 }
+async function nextLocalJourneyEntryId(): Promise<number> { const first = await offlineDb.journeyEntries.orderBy('id').first(); return first && first.id < 0 ? first.id - 1 : -1 }
 function localUserId(): number { try { const raw = localStorage.getItem('trek_auth_snapshot'); return Number(raw ? JSON.parse(raw)?.state?.user?.id ?? 0 : 0) } catch { return 0 } }
 
 async function nextLocalAssignmentId(): Promise<number> {
@@ -322,6 +325,65 @@ export class SyncManager {
       }
       await offlineDb.entitySyncMeta.put({ key, entityType: 'collectionPlace', entityId: change.entityId, status: 'synced', remoteVersion: change.remoteVersion, lastSyncedAt: Date.now(), lastError: null })
       await offlineDb.syncConflicts.delete(key); return 'applied'
+    })
+  }
+
+  private async applyRemoteJourney(change: RemoteChange): Promise<'applied' | 'conflict' | 'unchanged'> {
+    const key = syncEntityKey(change.entityType, change.entityId)
+    return offlineDb.transaction('rw', [offlineDb.journeys, offlineDb.syncOutbox, offlineDb.entitySyncMeta, offlineDb.syncConflicts], async () => {
+      const [meta, local] = await Promise.all([offlineDb.entitySyncMeta.get(key), offlineDb.journeys.where('sync_id').equals(change.entityId).first()])
+      if (meta?.remoteVersion === change.remoteVersion) return 'unchanged'
+      if (change.operation === 'delete') {
+        if (local) await offlineDb.journeys.put({ ...local, deleted_at: new Date().toISOString() })
+      } else {
+        const remote = change.payload as SyncedJourney
+        if (!remote || remote.schemaVersion !== 1 || remote.id !== change.entityId) throw new Error(`Invalid remote journey ${change.entityId}`)
+        const updated = Date.parse(remote.updatedAt)
+        const row: LocalJourneyRecord = {
+          id: local?.id ?? await nextLocalJourneyId(), sync_id: remote.id, user_id: remote.ownerUserId,
+          owner_auth_id: remote.ownerAuthId, owner_username: remote.ownerUsername, title: remote.title, subtitle: remote.subtitle,
+          cover_gradient: remote.coverGradient, cover_image: null, status: remote.status,
+          trip_sync_ids: remote.tripIds, members: remote.members,
+          created_at: Date.parse(remote.createdAt), updated_at: Number.isFinite(updated) ? updated : Date.now(),
+          local_updated_at: remote.updatedAt, deleted_at: remote.deletedAt,
+        }
+        await offlineDb.journeys.put(row)
+      }
+      await offlineDb.entitySyncMeta.put({ key, entityType: 'journey', entityId: change.entityId, status: 'synced', remoteVersion: change.remoteVersion, lastSyncedAt: Date.now(), lastError: null })
+      await offlineDb.syncConflicts.delete(key)
+      return 'applied'
+    })
+  }
+
+  private async applyRemoteJourneyEntry(change: RemoteChange): Promise<'applied' | 'conflict' | 'unchanged'> {
+    const key = syncEntityKey(change.entityType, change.entityId)
+    return offlineDb.transaction('rw', [offlineDb.journeys, offlineDb.journeyEntries, offlineDb.trips, offlineDb.places, offlineDb.syncOutbox, offlineDb.entitySyncMeta, offlineDb.syncConflicts], async () => {
+      const [meta, local] = await Promise.all([offlineDb.entitySyncMeta.get(key), offlineDb.journeyEntries.where('sync_id').equals(change.entityId).first()])
+      if (meta?.remoteVersion === change.remoteVersion) return 'unchanged'
+      if (change.operation === 'delete') {
+        if (local) await offlineDb.journeyEntries.put({ ...local, deleted_at: new Date().toISOString() })
+      } else {
+        const remote = change.payload as SyncedJourneyEntry
+        if (!remote || remote.schemaVersion !== 1 || remote.id !== change.entityId) throw new Error(`Invalid remote journey entry ${change.entityId}`)
+        const journey = await offlineDb.journeys.where('sync_id').equals(remote.journeyId).first()
+        if (!journey || journey.deleted_at) throw new Error(`Journey ${remote.journeyId} is unavailable`)
+        const [trip, place] = await Promise.all([
+          remote.sourceTripId ? offlineDb.trips.where('sync_id').equals(remote.sourceTripId).first() : undefined,
+          remote.sourcePlaceId ? offlineDb.places.where('sync_id').equals(remote.sourcePlaceId).first() : undefined,
+        ])
+        const row: LocalJourneyEntryRecord = {
+          ...remote.value, id: local?.id ?? await nextLocalJourneyEntryId(), sync_id: remote.id,
+          journey_id: journey.id, journey_sync_id: journey.sync_id,
+          source_trip_id: trip && !trip.deleted_at ? trip.id : null, source_trip_sync_id: remote.sourceTripId,
+          source_place_id: place && !place.deleted_at ? place.id : null, source_place_sync_id: remote.sourcePlaceId,
+          photos: [], created_at: Date.parse(remote.createdAt), updated_at: Date.parse(remote.updatedAt),
+          local_updated_at: remote.updatedAt, deleted_at: remote.deletedAt,
+        }
+        await offlineDb.journeyEntries.put(row)
+      }
+      await offlineDb.entitySyncMeta.put({ key, entityType: 'journeyEntry', entityId: change.entityId, status: 'synced', remoteVersion: change.remoteVersion, lastSyncedAt: Date.now(), lastError: null })
+      await offlineDb.syncConflicts.delete(key)
+      return 'applied'
     })
   }
 
@@ -630,6 +692,8 @@ export class SyncManager {
     if (change.entityType === 'category') return this.applyRemoteCategory(change)
     if (change.entityType === 'collection') return this.applyRemoteCollection(change)
     if (change.entityType === 'collectionPlace') return this.applyRemoteCollectionPlace(change)
+    if (change.entityType === 'journey') return this.applyRemoteJourney(change)
+    if (change.entityType === 'journeyEntry') return this.applyRemoteJourneyEntry(change)
     if (change.entityType === 'place') return this.applyRemotePlace(change)
     if (change.entityType === 'assignment') return this.applyRemoteAssignment(change)
     if (change.entityType === 'accommodation') return this.applyRemoteAccommodation(change)
@@ -671,6 +735,12 @@ export class SyncManager {
       } else if (row.entityType === 'collectionPlace') {
         const value = await offlineDb.collectionPlaces.where('sync_id').equals(row.entityId).first(); if (!value) continue
         changes.push({ entityType: 'collectionPlace', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedCollectionPlace(value as LocalCollectionPlaceRecord) })
+      } else if (row.entityType === 'journey') {
+        const value = await offlineDb.journeys.where('sync_id').equals(row.entityId).first(); if (!value) continue
+        changes.push({ entityType: 'journey', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedJourney(value) })
+      } else if (row.entityType === 'journeyEntry') {
+        const value = await offlineDb.journeyEntries.where('sync_id').equals(row.entityId).first(); if (!value) continue
+        changes.push({ entityType: 'journeyEntry', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedJourneyEntry(value) })
       } else if (row.entityType === 'place') {
         const value = await offlineDb.places.where('sync_id').equals(row.entityId).first(); if (!value) continue
         changes.push({ entityType: 'place', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedPlace(value as LocalPlaceRecord) })
@@ -710,7 +780,7 @@ export class SyncManager {
         changes.push({ entityType: 'tripFile', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedTripFile(value) })
       }
     }
-    const order = { trip: 0, day: 1, dayNote: 2, category: 2, collection: 2, place: 3, collectionPlace: 4, assignment: 4, accommodation: 5, reservation: 6, budgetItem: 7, todo: 7, packingBag: 7, packingItem: 8, tripFile: 9, packingConfig: 10, vacay: 10, atlas: 10 } as const
+    const order = { trip: 0, day: 1, dayNote: 2, category: 2, collection: 2, place: 3, collectionPlace: 4, journey: 5, journeyEntry: 6, assignment: 4, accommodation: 5, reservation: 6, budgetItem: 7, todo: 7, packingBag: 7, packingItem: 8, tripFile: 9, packingConfig: 10, vacay: 10, atlas: 10 } as const
     const queued = new Map(outbox.map(row => [row.key, row]))
     return changes.map(change => {
       const row = queued.get(syncEntityKey(change.entityType, change.entityId))
@@ -749,7 +819,7 @@ export class SyncManager {
     // Pull from the device's previous cursor, not the post-push cursor: this
     // downloads our server-stamped revisions plus any concurrent device writes.
     const remote = await this.provider.pull(previousCursor)
-    const order = { trip: 0, day: 1, dayNote: 2, category: 2, collection: 2, place: 3, collectionPlace: 4, assignment: 4, accommodation: 5, reservation: 6, budgetItem: 7, todo: 7, packingBag: 7, packingItem: 8, tripFile: 9, packingConfig: 10, vacay: 10, atlas: 10 } as const
+    const order = { trip: 0, day: 1, dayNote: 2, category: 2, collection: 2, place: 3, collectionPlace: 4, journey: 5, journeyEntry: 6, assignment: 4, accommodation: 5, reservation: 6, budgetItem: 7, todo: 7, packingBag: 7, packingItem: 8, tripFile: 9, packingConfig: 10, vacay: 10, atlas: 10 } as const
     const ordered = [...remote.changes].sort((a, b) => order[a.entityType] - order[b.entityType])
     let pulled = 0
     for (const change of ordered) {
@@ -782,7 +852,7 @@ export class SyncManager {
       const remote = await this.provider.pull(previous?.cursor)
       let pulled = 0
       let conflicts = 0
-      const dependencyOrder = { trip: 0, day: 1, dayNote: 2, category: 2, collection: 2, place: 3, collectionPlace: 4, assignment: 4, accommodation: 5, reservation: 6, budgetItem: 7, todo: 7, packingBag: 7, packingItem: 8, tripFile: 9, packingConfig: 10, vacay: 10, atlas: 10 } as const
+      const dependencyOrder = { trip: 0, day: 1, dayNote: 2, category: 2, collection: 2, place: 3, collectionPlace: 4, journey: 5, journeyEntry: 6, assignment: 4, accommodation: 5, reservation: 6, budgetItem: 7, todo: 7, packingBag: 7, packingItem: 8, tripFile: 9, packingConfig: 10, vacay: 10, atlas: 10 } as const
       const orderedRemoteChanges = [...remote.changes].sort(
         (a, b) => dependencyOrder[a.entityType] - dependencyOrder[b.entityType],
       )
@@ -831,6 +901,12 @@ export class SyncManager {
         } else if (row.entityType === 'collectionPlace') {
           const value = await offlineDb.collectionPlaces.where('sync_id').equals(row.entityId).first(); if (!value) continue
           changes.push({ entityType: 'collectionPlace', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedCollectionPlace(value as LocalCollectionPlaceRecord) })
+        } else if (row.entityType === 'journey') {
+          const value = await offlineDb.journeys.where('sync_id').equals(row.entityId).first(); if (!value) continue
+          changes.push({ entityType: 'journey', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedJourney(value) })
+        } else if (row.entityType === 'journeyEntry') {
+          const value = await offlineDb.journeyEntries.where('sync_id').equals(row.entityId).first(); if (!value) continue
+          changes.push({ entityType: 'journeyEntry', entityId: row.entityId, operation: row.operation, baseVersion: meta?.remoteVersion, payload: toSyncedJourneyEntry(value) })
         } else if (row.entityType === 'place') {
           const place = await offlineDb.places.where('sync_id').equals(row.entityId).first()
           if (!place) continue

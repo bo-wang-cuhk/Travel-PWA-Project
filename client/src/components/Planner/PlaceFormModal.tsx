@@ -10,6 +10,7 @@ import { useSettingsStore } from '../../store/settingsStore'
 import { useAddonStore } from '../../store/addonStore'
 import CollectionPicker from '../Collections/CollectionPicker'
 import PlaceDetailsColumn, { type PlaceDetailsSelection } from './PlaceDetailsColumn'
+import ProviderPlaceDetailsColumn from './ProviderPlaceDetailsColumn'
 import { useToast } from '../shared/Toast'
 import { Search, Paperclip, X, AlertTriangle, Loader2, Plus } from 'lucide-react'
 import { useTranslation } from '../../i18n'
@@ -186,6 +187,8 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
     if (place && place.lat != null && place.lng != null) {
       setDetailsSelection({
         placeId: place.google_place_id || place.osm_id || undefined,
+        source: place.source === 'baidu' || place.source === 'google' || place.source === 'osm' ? place.source : undefined,
+        providerPlaceId: place.external_place_id || place.google_place_id || place.osm_id || undefined,
         lat: Number(place.lat),
         lng: Number(place.lng),
         name: place.name || '',
@@ -193,6 +196,8 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
     } else if (prefillCoords) {
       setDetailsSelection({
         placeId: prefillCoords.osm_id || undefined,
+        source: prefillCoords.osm_id ? 'osm' : undefined,
+        providerPlaceId: prefillCoords.osm_id || undefined,
         lat: prefillCoords.lat,
         lng: prefillCoords.lng,
         name: prefillCoords.name || '',
@@ -341,6 +346,8 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
     if (Number.isFinite(lat) && Number.isFinite(lng)) {
       setDetailsSelection({
         placeId: result.google_place_id || result.osm_id || undefined,
+        source: result.source === 'baidu' || result.source === 'google' || result.source === 'osm' ? result.source : undefined,
+        providerPlaceId: result.external_place_id || result.google_place_id || result.osm_id || undefined,
         lat,
         lng,
         name: result.name || '',
@@ -678,7 +685,7 @@ export default function PlaceFormModal(props: PlaceFormModalProps) {
   // The legacy enrichment fan-out belongs to TREK Server. The standalone PWA's
   // Edge Function intentionally only searches; a failed details column must not
   // make a successful Nominatim result look broken.
-  const showDetails = !STANDALONE_MODE && !isMobile && placesEnrichEnabled
+  const showDetails = !isMobile && (STANDALONE_MODE || placesEnrichEnabled)
   const modalSize = isMobile ? 'lg' : showDetails && twoColumn ? '5xl' : showDetails || twoColumn ? '4xl' : 'lg'
   const descriptionRef = useRef<HTMLTextAreaElement | null>(null)
   const notesRef = useRef<HTMLTextAreaElement | null>(null)
@@ -710,7 +717,7 @@ export default function PlaceFormModal(props: PlaceFormModalProps) {
     >
       <div className={twoColumn || showDetails ? 'flex gap-5 items-stretch' : ''}>
       {showDetails && (
-        <PlaceDetailsColumn
+        STANDALONE_MODE ? <ProviderPlaceDetailsColumn selection={detailsSelection} language={language} locale={S.locale} t={t} /> : <PlaceDetailsColumn
           selection={detailsSelection}
           selectedImageUrl={form.image_url}
           onPickImage={(url) => setForm(prev => ({ ...prev, image_url: url ?? undefined }))}

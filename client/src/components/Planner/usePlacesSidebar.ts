@@ -16,6 +16,7 @@ import type { Place, Category, Day, AssignmentsMap } from '../../types'
 import { getGoogleMapsUrlForPlace } from './placeGoogleMaps'
 import { safeHttpUrl } from '../../utils/safeUrl'
 import { plannedPlaceIds, type PlannedAccommodation } from '../../utils/plannedPlaces'
+import { statusOptions, type VisitStatus } from './placeVisitStatusModel'
 
 /** Stable identity — a fresh [] default would invalidate the planned memo on every render. */
 const NO_ACCOMMODATIONS: PlannedAccommodation[] = []
@@ -61,6 +62,7 @@ export function usePlacesSidebar(props: PlacesSidebarProps) {
   // A booking plans the place it points at, so the pool has to see them (#2072).
   const reservations = useTripStore((s) => s.reservations)
   const loadTrip = useTripStore((s) => s.loadTrip)
+  const updatePlace = useTripStore((s) => s.updatePlace)
   const can = useCanDo()
   const canEditPlaces = can('place_edit', trip)
   const collectionsEnabled = useAddonStore((s) => s.isEnabled('collections'))
@@ -280,10 +282,11 @@ export function usePlacesSidebar(props: PlacesSidebarProps) {
     return new Set<number>((assignments[String(selectedDayId)] || []).map((a: any) => a.place?.id).filter(Boolean))
   }, [assignments, selectedDayId])
 
-  const openContextMenu = useCallback((e: React.MouseEvent, place: Place) => {
+  const openContextMenu = (e: React.MouseEvent, place: Place) => {
     const selDayId = selectedDayIdRef.current
     const googleMapsUrl = getGoogleMapsUrlForPlace(place)
     ctxMenu.open(e, [
+      ...(canEditPlaces ? [...visitMenuItems(place), { divider: true }] : []),
       canEditPlaces && { label: t('common.edit'), icon: Pencil, onClick: () => props.onEditPlace(place) },
       selDayId && { label: t('planner.addToDay'), icon: CalendarDays, onClick: () => props.onAssignToDay(place.id, selDayId) },
       safeHttpUrl(place.website) && { label: t('inspector.website'), icon: ExternalLink, onClick: () => window.open(safeHttpUrl(place.website)!, '_blank', 'noopener,noreferrer') },
@@ -292,7 +295,25 @@ export function usePlacesSidebar(props: PlacesSidebarProps) {
       { divider: true },
       canEditPlaces && { label: t('common.delete'), icon: Trash2, danger: true, onClick: () => props.onDeletePlace(place.id) },
     ])
-  }, [ctxMenu.open, canEditPlaces, collectionsEnabled, t, props.onEditPlace, props.onAssignToDay, props.onDeletePlace])
+  }
+
+  function setVisitStatus(place: Place, status: VisitStatus) {
+    if (!canEditPlaces || (place.visit_status ?? 'planned') === status) return
+    void updatePlace(tripId, place.id, { visit_status: status }).catch(() => toast.error(t('common.error')))
+  }
+
+  function visitMenuItems(place: Place) {
+    return canEditPlaces ? statusOptions.map(option => ({
+      label: t(option.key), icon: option.icon,
+      onClick: () => setVisitStatus(place, option.value),
+    })) : []
+  }
+
+  const toggleVisitStatus = (place: Place) => {
+    if (place.visit_status === 'skipped') return
+    setVisitStatus(place, place.visit_status === 'visited' ? 'planned' : 'visited')
+  }
+  const openVisitMenu = (place: Place, x: number, y: number) => ctxMenu.openAt(x, y, visitMenuItems(place))
 
   return {
     ...props,
@@ -313,7 +334,7 @@ export function usePlacesSidebar(props: PlacesSidebarProps) {
     markSelectionVisited, markVisitedBusy,
     exitSelectMode, toggleSelected, toggleCategoryFilter, dayPickerPlace, setDayPickerPlace,
     catDropOpen, setCatDropOpen, mobileShowDays, setMobileShowDays,
-    hasTracks, plannedIds, filtered, registerPlaceRow, isAssignedToSelectedDay, inDaySet, openContextMenu,
+    hasTracks, plannedIds, filtered, registerPlaceRow, isAssignedToSelectedDay, inDaySet, openContextMenu, toggleVisitStatus, openVisitMenu,
   }
 }
 

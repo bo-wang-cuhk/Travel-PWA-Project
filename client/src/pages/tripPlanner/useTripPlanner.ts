@@ -461,6 +461,10 @@ export function useTripPlanner() {
   const [expandedDayIds, setExpandedDayIds] = useState<Set<number> | null>(null)
 
   const mapPlaces = useMemo(() => {
+    // Local-first places keep the category as an embedded object (and synced
+    // places may only have category_id). Map markers and hover cards still use
+    // the joined category_* fields from the old API shape.
+    const categoriesById = new globalThis.Map(categories.map(category => [category.id, category]))
     // Build set of place IDs assigned to collapsed days
     const hiddenPlaceIds = new Set<number>()
     if (expandedDayIds) {
@@ -507,8 +511,18 @@ export function useTripPlanner() {
       if (placesFilter === 'unplanned' && plannedIds && plannedIds.has(p.id)) return false
       if (placesFilter === 'planned' && plannedIds && !plannedIds.has(p.id)) return false
       return true
+    }).map(place => {
+      const category = place.category_id == null
+        ? null
+        : categoriesById.get(place.category_id) ?? (place.category?.id === place.category_id ? place.category : null)
+      return {
+        ...place,
+        category_name: category?.name ?? null,
+        category_color: category?.color ?? null,
+        category_icon: category?.icon ?? null,
+      }
     })
-  }, [places, placesCategoryFilter, placesFilter, assignments, expandedDayIds, selectedDayId, days, tripAccommodations, reservations])
+  }, [places, categories, placesCategoryFilter, placesFilter, assignments, expandedDayIds, selectedDayId, days, tripAccommodations, reservations])
 
   const { route, routeSegments, routeVias, routeInfo, setRoute, setRouteInfo, updateRouteForDay } = useRouteCalculation({ assignments } as any, selectedDayId, routeShown, routeProfile, tripAccommodations)
 

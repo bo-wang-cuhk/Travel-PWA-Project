@@ -80,6 +80,16 @@ describe('touchDragBridge (#1616)', () => {
     expect(seen).toContain('dragover@zone')
   })
 
+  it('leaves a status icon long press for its menu while the rest of the row stays draggable', () => {
+    const status = document.createElement('button')
+    status.dataset.noTouchDrag = ''
+    source.append(status)
+    longPress(status)
+    expect(seen).not.toContain('dragstart@source')
+    longPress(source)
+    expect(seen).toContain('dragstart@source')
+  })
+
   it('FE-TOUCHDRAG-003: once armed the move is consumed so the pane does not scroll', () => {
     longPress()
     expect(touchMove([{ clientX: 200, clientY: 200 }])).toBe(false)

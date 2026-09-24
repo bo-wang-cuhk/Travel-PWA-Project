@@ -1,6 +1,7 @@
 import { corsHeaders, json } from '../_shared/http.ts'
 import { BaiduProvider, GoogleProvider, OSMProvider, searchWithFallback } from './providers.ts'
 import { osmRequest } from './osmRequest.ts'
+import { fetchPlaceDetails } from './details.ts'
 
 const NOMINATIM_URL = Deno.env.get('PLACE_SEARCH_BASE_URL')?.replace(/\/$/, '')
   || 'https://nominatim.openstreetmap.org'
@@ -8,7 +9,9 @@ const APP_USER_AGENT = Deno.env.get('PLACE_SEARCH_USER_AGENT')
   || 'Roamune-Travel-PWA/1.0 (https://github.com/bo-wang-cuhk/Travel-PWA-Project)'
 
 interface SearchBody {
-  action?: 'search' | 'reverse' | 'resolve-url'
+  action?: 'search' | 'reverse' | 'resolve-url' | 'details'
+  provider?: 'baidu' | 'osm'
+  providerPlaceId?: string
   q?: string
   lang?: string
   limit?: number
@@ -125,6 +128,20 @@ Deno.serve(async (req: Request) => {
   try {
     const body = await req.json() as SearchBody
     const action = body.action || 'search'
+    if (action === 'details') {
+      // Search can still fall back to Google; its detail data is intentionally
+      // outside this local cache feature.
+      if (!['baidu', 'osm'].includes(body.provider || '')
+        || !body.providerPlaceId || body.providerPlaceId.length > 200) {
+        return json({ error: 'Invalid place details request' }, 400)
+      }
+      return json(await fetchPlaceDetails(body.provider!, body.providerPlaceId, body.lang, {
+        baiduKey: Deno.env.get('BAIDU_MAPS_AK'),
+        baiduSecurityKey: Deno.env.get('BAIDU_MAPS_SK'),
+        osmUrl: NOMINATIM_URL,
+        userAgent: APP_USER_AGENT,
+      }))
+    }
     if (action === 'search') {
       const q = body.q?.trim()
       if (!q || q.length > 200) return json({ error: 'Invalid search query' }, 400)
