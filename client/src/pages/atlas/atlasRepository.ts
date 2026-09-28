@@ -103,7 +103,7 @@ export async function atlasStats(): Promise<AtlasData> {
     map[continent] = (map[continent] || 0) + 1
   }
   const totalDays = trips.reduce((sum, trip) => trip.start_date && trip.end_date ? sum + Math.max(0, Math.floor((Date.parse(trip.end_date) - Date.parse(trip.start_date)) / 86400000) + 1) : sum, 0)
-  return { countries: visible, stats: { totalTrips: trips.length, totalPlaces: places.length, totalCountries: visited.length, totalDays, totalCountriesPlanned: visible.filter(country => country.status === 'planned').length, totalCountriesIdea: visible.filter(country => country.status === 'idea').length }, mostVisited: [...visited].sort((a,b) => b.tripCount - a.tripCount)[0] || null, continents, continentsPlanned }
+  return { footprintPlaces: resolved.map(place => ({ lat: place.lat, lng: place.lng, countryCode: place.code })), countries: visible, stats: { totalTrips: trips.length, totalPlaces: places.length, totalCountries: visited.length, totalDays, totalCountriesPlanned: visible.filter(country => country.status === 'planned').length, totalCountriesIdea: visible.filter(country => country.status === 'idea').length }, mostVisited: [...visited].sort((a,b) => b.tripCount - a.tripCount)[0] || null, continents, continentsPlanned }
 }
 
 export async function visitedRegions(): Promise<Record<string, { code: string; name: string; placeCount: number; manuallyMarked?: boolean; status?: VisitStatus }[]>> {

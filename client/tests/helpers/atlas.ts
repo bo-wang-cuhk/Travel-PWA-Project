@@ -107,6 +107,8 @@ export function buildAtlasController(over: Record<string, unknown> = {}): AtlasC
     countries: buildAtlasData().countries,
     visitedCountries: buildAtlasData().countries,
     visibleCountries: buildAtlasData().countries,
+    viewMode: 'china',
+    setViewMode: vi.fn(() => undefined),
     showPlanned: false,
     togglePlanned: vi.fn(() => undefined),
     selectedCountry: null,

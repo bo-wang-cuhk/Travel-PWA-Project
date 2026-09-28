@@ -29,6 +29,7 @@ export interface AtlasStats {
 }
 
 export interface AtlasData {
+  footprintPlaces?: import('./footprintViewModel').FootprintPoint[]
   countries: AtlasCountry[]
   stats: AtlasStats
   mostVisited?: AtlasCountry | null

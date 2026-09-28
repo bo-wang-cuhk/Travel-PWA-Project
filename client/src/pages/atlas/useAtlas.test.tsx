@@ -62,7 +62,7 @@ const lf = vi.hoisted(() => ({
   markerPoint: { x: 500, y: 400 },
   scrollPropagationOff: [] as HTMLElement[],
   clickPropagationOff: [] as HTMLElement[],
-  map: null as null | { setView: ReturnType<typeof vi.fn> },
+  map: null as null | { setView: ReturnType<typeof vi.fn>; fitBounds: ReturnType<typeof vi.fn> },
   reset() {
     this.mapHandlers = {};
     this.geoJson = [];
@@ -304,15 +304,38 @@ async function mountAtlas(over: Partial<Record<string, unknown>> = {}, props: { 
 beforeEach(() => {
   lf.reset();
   resetAllStores();
+  // Existing map tests cover the full world. China is tested explicitly below.
+  localStorage.setItem('trek_footprint_view_mode', 'global');
   seedStore(useSettingsStore, { settings: buildSettings({ dark_mode: false }) });
 });
 
 afterEach(() => {
+  localStorage.removeItem('trek_footprint_view_mode');
   vi.unstubAllGlobals();
   delete window.__addToast;
 });
 
 describe('useAtlas', () => {
+  it('switches modes in one map, remembers the choice and does not refit after a refresh', async () => {
+    localStorage.removeItem('trek_footprint_view_mode');
+    await mountAtlas({ stats: { ...statsResponse,
+      countries: [{ code: 'CN', placeCount: 1, tripCount: 1 }, { code: 'FR', placeCount: 1, tripCount: 1 }],
+      footprintPlaces: [{lat: 39.9, lng: 116.4, countryCode: 'CN'}, {lat: 48.8, lng: 2.3, countryCode: 'FR'}],
+    }});
+    await waitFor(() => expect(lf.map?.fitBounds).toHaveBeenCalled());
+    expect(atlas.viewMode).toBe('china');
+    expect(lf.map?.fitBounds).toHaveBeenLastCalledWith([[39.9, 116.4], [39.9, 116.4]], expect.objectContaining({ maxZoom: 8 }));
+    const mapCount = lf.mapsCreated;
+    const fitCount = lf.map!.fitBounds.mock.calls.length;
+    act(() => atlas.setData({ ...atlas.data! }));
+    expect(lf.map!.fitBounds).toHaveBeenCalledTimes(fitCount);
+    act(() => atlas.setViewMode('global'));
+    expect(localStorage.getItem('trek_footprint_view_mode')).toBe('global');
+    expect(lf.mapsCreated).toBe(mapCount);
+    expect(lf.map!.fitBounds).toHaveBeenCalledTimes(fitCount + 1);
+    expect(atlas.stats.totalPlaces).toBe(statsResponse.stats.totalPlaces);
+  });
+
   it('FE-HOOK-ATLAS-001: loads stats, bucket list and visited regions on mount', async () => {
     await mountAtlas({
       bucket: [{ id: 1, name: 'Kyoto', lat: 35, lng: 135, country_code: 'JP', notes: null, target_date: null }],

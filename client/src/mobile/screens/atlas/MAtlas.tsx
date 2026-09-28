@@ -1,3 +1,4 @@
+import FootprintViewToggle from '../../../pages/atlas/FootprintViewToggle'
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { X } from 'lucide-react'
@@ -34,6 +35,7 @@ export default function MAtlas() {
     visitedCountries,
     showPlanned,
     togglePlanned,
+    viewMode, setViewMode,
     bucketList,
     selectedCountry,
     countryDetail,
@@ -128,6 +130,9 @@ export default function MAtlas() {
         )}
       </div>
 
+      <div className="absolute left-4 top-[calc(var(--m-safe-top,12px)+48px)] z-[5]">
+        <FootprintViewToggle mode={viewMode} onChange={setViewMode} t={t} mobile />
+      </div>
       <MAtlasStatsCard stats={stats} />
 
       <MAtlasSearch

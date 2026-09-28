@@ -16,6 +16,9 @@ import { useToast } from '../../components/shared/Toast'
 import { getApiErrorMessage } from '../../types'
 import { STANDALONE_MODE } from '../../config/runtimeMode'
 
+import { filterFootprintPoints, footprintBounds, readFootprintViewMode, FOOTPRINT_VIEW_KEY, type FootprintViewMode } from './footprintViewModel'
+import { locateCountry } from './atlasGeo'
+
 const PLANNED_KEY = 'trek_atlas_show_planned'
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -129,6 +132,12 @@ export function useAtlas() {
     if (borderGlareRef.current) borderGlareRef.current.style.opacity = '0'
   }
 
+  const [viewMode, setViewModeState] = useState<FootprintViewMode>(readFootprintViewMode)
+  const lastFittedMode = useRef<FootprintViewMode | null>(null)
+  const setViewMode = (mode: FootprintViewMode) => {
+    setViewModeState(mode)
+    try { localStorage.setItem(FOOTPRINT_VIEW_KEY, mode) } catch { /* use the current session */ }
+  }
   const [data, setData] = useState<AtlasData | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(true)
@@ -198,6 +207,17 @@ export function useAtlas() {
   // visibleCountries drives what the map paints and what stays clickable.
   const visitedCountries = useMemo(() => (data?.countries ?? []).filter(c => countryStatus(c) === 'visited'), [data])
   const visibleCountries = useMemo(() => (data?.countries ?? []).filter(c => isCountryVisible(c, showPlanned)), [data, showPlanned])
+
+  const mapCountries = useMemo(() => visibleCountries.filter(c => viewMode === 'global' || c.code === 'CN'), [visibleCountries, viewMode])
+  const [bucketCountryCodes, setBucketCountryCodes] = useState<Record<string, string | null>>({})
+  useEffect(() => {
+    let cancelled = false
+    if (viewMode === 'global') return
+    void Promise.all(bucketList.filter(item => !item.country_code && item.lat != null && item.lng != null).map(async item => [String(item.id), await locateCountry(item.lat!, item.lng!).catch(() => null)] as const))
+      .then(entries => { if (!cancelled) setBucketCountryCodes(Object.fromEntries(entries)) })
+    return () => { cancelled = true }
+  }, [bucketList, viewMode])
+  const mapBucketList = useMemo(() => viewMode === 'global' ? bucketList : bucketList.filter(item => (item.country_code || bucketCountryCodes[String(item.id)]) === 'CN'), [bucketList, bucketCountryCodes, viewMode])
 
   const atlas_country_options = useMemo(() => {
     if (!geoData) return []
@@ -343,6 +363,7 @@ export function useAtlas() {
     const bounds = mapInstance.current.getBounds()
     const toLoad: string[] = []
     for (const [code, layer] of Object.entries(country_layer_by_a2_ref.current)) {
+      if (viewMode === 'china' && code !== 'CN') continue
       if (regionGeoCache.current[code]) {
         // Recency means recency of being on screen. Touching every cached country wrote
         // the order back into GeoJSON feature order on every moveend, so the eviction
@@ -380,17 +401,19 @@ export function useAtlas() {
     if (mapInstance.current) { mapInstance.current.remove(); mapInstance.current = null }
 
     const map = L.map(mapRef.current, {
-      center: [25, 0],
-      zoom: 3,
-      minZoom: 3,
+      center: [35, 104],
+      zoom: 4,
+      minZoom: 1,
       maxZoom: 10,
       zoomControl: false,
       attributionControl: false,
-      maxBounds: [[-90, -220], [90, 220]],
+      maxBounds: [[-85, -540], [85, 540]],
       maxBoundsViscosity: 1.0,
       fadeAnimation: false,
       preferCanvas: true,
     })
+
+    lastFittedMode.current = null
 
     L.control.zoom({ position: 'bottomright' }).addTo(map)
 
@@ -499,11 +522,12 @@ export function useAtlas() {
   useEffect(() => {
     if (!mapInstance.current || !geoData || !data || !countryRendererRef.current) return
 
-    const visitedA3 = new Set(visibleCountries.map(c => A2_TO_A3[c.code]).filter(Boolean))
-    const plannedA3 = new Set(visibleCountries.filter(c => countryStatus(c) !== 'visited').map(c => A2_TO_A3[c.code]).filter(Boolean))
+    country_layer_by_a2_ref.current = {}
+    const visitedA3 = new Set(mapCountries.map(c => A2_TO_A3[c.code]).filter(Boolean))
+    const plannedA3 = new Set(mapCountries.filter(c => countryStatus(c) !== 'visited').map(c => A2_TO_A3[c.code]).filter(Boolean))
     const countryMap = {}
-    visibleCountries.forEach(c => { if (A2_TO_A3[c.code]) countryMap[A2_TO_A3[c.code]] = c })
-    const wishlistA3 = wishlistA3Codes(bucketList, visitedA3)
+    mapCountries.forEach(c => { if (A2_TO_A3[c.code]) countryMap[A2_TO_A3[c.code]] = c })
+    const wishlistA3 = wishlistA3Codes(mapBucketList, visitedA3)
 
     // Preserve current map view
     const currentCenter = mapInstance.current.getCenter()
@@ -561,6 +585,11 @@ export function useAtlas() {
         }
       },
       onEachFeature: (feature, layer) => {
+        const code = feature.properties?.ISO_A2
+        if (viewMode === 'china' && code !== 'CN') {
+          if (code && code !== '-99') country_layer_by_a2_ref.current[code] = layer
+          return
+        }
         const a3 = feature.properties?.ADM0_A3 || feature.properties?.ISO_A3 || feature.properties?.['ISO3166-1-Alpha-3'] || feature.id
         const c = countryMap[a3]
         if (c) {
@@ -637,7 +666,23 @@ export function useAtlas() {
 
     // Restore map view after re-render
     mapInstance.current.setView(currentCenter, currentZoom, { animate: false })
-  }, [geoData, data, dark, visibleCountries, visitedCountries, bucketList])
+  }, [geoData, data, dark, visibleCountries, visitedCountries, mapBucketList, mapCountries, viewMode])
+
+  // Fit once per mode (or map rebuild), never after an ordinary sync refresh.
+  useEffect(() => {
+    const map = mapInstance.current
+    if (!map || !data || !geoData || lastFittedMode.current === viewMode) return
+    lastFittedMode.current = viewMode
+    const visibleCodes = new Set(mapCountries.map(country => country.code))
+    const points = filterFootprintPoints(data.footprintPlaces || [], viewMode).filter(point => visibleCodes.has(point.countryCode))
+    const bounds = footprintBounds(points)
+    const phone = window.innerWidth < 768
+    const paddingTopLeft: [number, number] = [phone ? 24 : 48, phone ? 90 : 80]
+    const paddingBottomRight: [number, number] = [phone ? 24 : 380, phone ? 210 : 48]
+    if (bounds) map.fitBounds(bounds, { maxZoom: 8, paddingTopLeft, paddingBottomRight, animate: false })
+    else if (viewMode === 'china') map.fitBounds([[18, 73], [54, 135]], { maxZoom: 4, paddingTopLeft, paddingBottomRight, animate: false })
+    else map.setView([20, 20], 2, { animate: false })
+  }, [viewMode, data, geoData, loading, dark, mapCountries])
 
   // Render plugin tint layers (atlasLayerProvider hook) — a dashed wash over the
   // countries a plugin flagged, in its own non-interactive pane above the country
@@ -699,7 +744,7 @@ export function useAtlas() {
     // layer meant a continent's worth of admin-1 polygons stayed in the DOM, and every
     // newly loaded country tore the whole thing down and built it again (#1950).
     const bounds = viewportBounds()
-    const inViewCodes = Object.keys(regionGeoCache.current).filter(code => countryInView(code, bounds)).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+    const inViewCodes = Object.keys(regionGeoCache.current).filter(code => (viewMode === 'global' || code === 'CN') && countryInView(code, bounds)).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
     const sig = inViewCodes.join('|')
     if (!force && sig === renderedRegionSigRef.current) return
 
@@ -875,7 +920,7 @@ export function useAtlas() {
     // visitedCountries belongs here: the region colours are derived from it, and without
     // the dep this effect kept painting regions from a stale country list.
     rebuildRegionLayerRef.current(true)
-  }, [regionGeoLoaded, visitedRegions, dark, t, visitedCountries, showPlanned])
+  }, [regionGeoLoaded, visitedRegions, dark, t, visitedCountries, showPlanned, viewMode])
 
   const handleMarkCountry = (code: string, name: string): void => {
     setConfirmAction({ type: 'choose', code, name })
@@ -1104,8 +1149,8 @@ export function useAtlas() {
     if (bucketMarkersRef.current) {
       mapInstance.current.removeLayer(bucketMarkersRef.current)
     }
-    if (bucketList.length === 0) return
-    const markers = bucketList.filter(b => b.lat && b.lng).map(b => {
+    if (mapBucketList.length === 0) return
+    const markers = mapBucketList.filter(b => b.lat != null && b.lng != null).map(b => {
       const icon = L.divIcon({
         className: '',
         html: `<div style="width:28px;height:28px;border-radius:50%;background:rgba(251,191,36,0.9);display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.3);border:2px solid white"><svg width="14" height="14" viewBox="0 0 24 24" fill="white" stroke="none"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></div>`,
@@ -1162,7 +1207,7 @@ export function useAtlas() {
       return marker
     })
     bucketMarkersRef.current = L.layerGroup(markers).addTo(mapInstance.current)
-  }, [bucketList])
+  }, [mapBucketList])
 
   const loadCountryDetail = async (code: string): Promise<void> => {
     setSelectedCountry(code)
@@ -1181,7 +1226,7 @@ export function useAtlas() {
     mapRef, regionTooltipRef, panelRef, glareRef, borderGlareRef,
     handlePanelMouseMove, handlePanelMouseLeave,
     data, setData, stats, countries, selectedCountry, countryDetail,
-    visitedCountries, visibleCountries, showPlanned, togglePlanned,
+    visitedCountries, visibleCountries, showPlanned, togglePlanned, viewMode, setViewMode,
     loadCountryDetail, handleUnmarkCountry, select_country_from_search,
     visitedRegions, setVisitedRegions,
     atlas_country_search, set_atlas_country_search,

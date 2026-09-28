@@ -1,3 +1,4 @@
+import FootprintViewToggle from './atlas/FootprintViewToggle'
 import React, { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from '../i18n'
@@ -30,7 +31,7 @@ function AtlasPageDesktop(): React.ReactElement {
     mapRef, regionTooltipRef, panelRef, glareRef, borderGlareRef,
     handlePanelMouseMove, handlePanelMouseLeave,
     data, setData, stats, countries, selectedCountry, countryDetail,
-    showPlanned, togglePlanned,
+    showPlanned, togglePlanned, viewMode, setViewMode,
     loadCountryDetail, handleUnmarkCountry, select_country_from_search,
     visitedRegions, setVisitedRegions,
     atlas_country_search, set_atlas_country_search,
@@ -96,6 +97,9 @@ function AtlasPageDesktop(): React.ReactElement {
           onQueryChange={search_places}
           onSelectPlace={select_place_from_search}
         />
+        <div className="absolute left-4 top-[76px] z-10">
+          <FootprintViewToggle mode={viewMode} onChange={setViewMode} t={t} />
+        </div>
         <AtlasLayerToggle
           t={t}
           showPlanned={showPlanned}

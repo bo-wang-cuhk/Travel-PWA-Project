@@ -53,6 +53,14 @@ afterEach(() => {
 });
 
 describe('AtlasPage wiring', () => {
+  it('wires the map view buttons without replacing the full statistics', () => {
+    const atlas = setAtlas({ viewMode: 'china' });
+    render(<AtlasPage />);
+    expect(screen.getByRole('button', { name: 'atlas.viewMode.china' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'atlas.viewMode.global' }));
+    expect(atlas.setViewMode).toHaveBeenCalledWith('global');
+  });
+
   it('FE-PAGE-ATLASW-002: shows navbar and spinner while the atlas is loading', () => {
     setAtlas({ loading: true });
     render(<AtlasPage />);
