@@ -89,7 +89,7 @@ export function DayPlanSidebarToolbar({
           toast={toast}
           canManageShare={canManageShare}
         />
-        {(() => {
+        {trip?.type !== 'outing' && (() => {
           const allExpanded = days.length > 0 && days.every(d => expandedDays.has(d.id))
           const label = allExpanded ? t('dayplan.collapseAll') : t('dayplan.expandAll')
           return (
@@ -169,7 +169,7 @@ export function DayPlanSidebarToolbar({
             )}
           </div>
         )}
-        {canEditDays && onReorderDays && onAddDay && days.length > 0 && (
+        {trip?.type !== 'outing' && canEditDays && onReorderDays && onAddDay && days.length > 0 && (
           <div style={{ position: 'relative', flexShrink: 0 }}>
             <Tooltip label={t('dayplan.reorderDays')} placement="bottom">
               <button type="button"

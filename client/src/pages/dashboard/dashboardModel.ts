@@ -21,7 +21,7 @@ export interface Place {
   category_color?: string | null; category_icon?: string | null
 }
 export interface HeroBundle { members: Member[]; places: Place[] }
-export interface TravelStats { totalTrips?: number; totalDays?: number; totalPlaces?: number; totalDistanceKm?: number; countries?: string[] }
+export interface TravelStats { totalTrips?: number; totalOutings?: number; totalDays?: number; totalPlaces?: number; totalDistanceKm?: number; countries?: string[] }
 export interface UpcomingReservation {
   /** Unique per `type`, not on its own: a stay's two moments carry the
    *  accommodation id, which can collide with a reservation id. */

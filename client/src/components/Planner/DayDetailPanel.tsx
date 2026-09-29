@@ -289,7 +289,7 @@ export default function DayDetailPanel({ day, days, places, categories = [], tri
 
           {/* ── Reservations for this day's assignments ── */}
           {dayContributions.length > 0 && <PluginCardFooter items={dayContributions} tripId={tripId} />}
-          {(() => {
+          {tripObj?.type !== 'outing' && (() => {
             const dayAssignments = assignments[String(day.id)] || []
             const dayReservations = reservations.filter(r => {
               if (r.type === 'hotel') return false
@@ -331,6 +331,7 @@ export default function DayDetailPanel({ day, days, places, categories = [], tri
             )
           })()}
 
+          {tripObj?.type !== 'outing' && <>
           {/* Divider before accommodation */}
           <div style={{ height: 1, background: 'var(--border-faint)', margin: '12px 0' }} />
 
@@ -351,6 +352,8 @@ export default function DayDetailPanel({ day, days, places, categories = [], tri
               setDayAccommodations={setDayAccommodations} setAccommodation={setAccommodation}
               handleSaveAccommodation={handleSaveAccommodation} onAccommodationChange={onAccommodationChange} />
           </div>
+
+          </>}
 
           {/* Day-detail plugin slots: sandboxed, scoped to this day. */}
           {dayDetailPlugins.length > 0 && (

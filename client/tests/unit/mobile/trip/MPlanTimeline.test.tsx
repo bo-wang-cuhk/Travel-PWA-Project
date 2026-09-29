@@ -138,6 +138,18 @@ function renderTimeline(
 }
 
 describe('MPlanTimeline', () => {
+  it('keeps places and routes while hiding flight and stay controls for an outing', () => {
+    const planner = buildPlanner()
+    renderTimeline({
+      day: { ...DAY, title: null, day_number: 1 },
+      hotelChips: [{ key: 'stay', accId: 3, name: 'Overnight hotel', variant: 'checkin' }],
+    }, { trip: { ...planner.trip!, type: 'outing' } })
+    expect(screen.queryByText('LH 714 to Tokyo')).not.toBeInTheDocument()
+    expect(screen.queryByText('Overnight hotel')).not.toBeInTheDocument()
+    expect(screen.getAllByText('Museum').length).toBeGreaterThan(0)
+    expect(screen.getByText('Ueno Park')).toBeInTheDocument()
+  })
+
   beforeEach(() => {
     mocks.schedule = EMPTY_SCHEDULE
   })

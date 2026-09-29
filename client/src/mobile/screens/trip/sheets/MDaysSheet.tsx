@@ -15,7 +15,7 @@ import type { Day } from '../../../../types'
 export default function MDaysSheet({ planner, shell }: MTripSheetsProps) {
   const { t, locale } = useTranslation()
   const open = shell.sheet?.id === 'days'
-  const canEditDays = planner.can('day_edit', planner.trip)
+  const canEditDays = planner.trip?.type !== 'outing' && planner.can('day_edit', planner.trip)
   const ordered = [...planner.days].sort((a, b) => (a.day_number ?? 0) - (b.day_number ?? 0))
 
   const label = (day: Day, index: number): string => {

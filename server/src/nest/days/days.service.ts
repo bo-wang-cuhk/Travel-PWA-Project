@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import type { TrekWsPayload, TrekWsTripEventName } from '@trek/shared';
 import { RealtimeService } from '../realtime/realtime.service';
 import { DatabaseService, type TripAccess } from '../database/database.service';
@@ -86,7 +86,7 @@ export class DaysService {
 
   getAssignmentsForDay(dayId: number | string) {
     const assignments = this.db.all<AssignmentRow>(`
-    SELECT da.*, p.id as place_id, p.name as place_name, p.description as place_description,
+    SELECT da.*, p.id as place_id, p.name as place_name, p.visit_status, p.description as place_description,
       p.lat, p.lng, p.address, p.category_id, p.price, p.currency as place_currency,
       COALESCE(da.assignment_time, p.place_time) as place_time,
       COALESCE(da.assignment_end_time, p.end_time) as end_time,
@@ -162,7 +162,7 @@ export class DaysService {
     const dayPlaceholders = dayIds.map(() => '?').join(',');
 
     const allAssignments = this.db.all<AssignmentRow>(`
-    SELECT da.*, p.id as place_id, p.name as place_name, p.description as place_description,
+    SELECT da.*, p.id as place_id, p.name as place_name, p.visit_status, p.description as place_description,
       p.lat, p.lng, p.address, p.category_id, p.price, p.currency as place_currency,
       COALESCE(da.assignment_time, p.place_time) as place_time,
       COALESCE(da.assignment_end_time, p.end_time) as end_time,
@@ -208,6 +208,7 @@ export class DaysService {
   }
 
   create(tripId: string | number, date?: string, notes?: string) {
+    this.requireMultiDayTrip(tripId);
     const maxDay = this.db.get<{ max: number | null }>('SELECT MAX(day_number) as max FROM days WHERE trip_id = ?', tripId)!;
     const dayNumber = (maxDay.max || 0) + 1;
 
@@ -249,7 +250,14 @@ export class DaysService {
     return { ...updatedDay, assignments: this.getAssignmentsForDay(id) };
   }
 
+  private requireMultiDayTrip(tripId: string | number): void {
+    const trip = this.db.get<{ type: string }>('SELECT type FROM trips WHERE id = ?', tripId);
+    if (trip?.type === 'outing') throw new BadRequestException('Outings have exactly one day');
+  }
+
   remove(id: string | number): void {
+    const day = this.db.get<{ trip_id: number }>('SELECT trip_id FROM days WHERE id = ?', id);
+    if (day) this.requireMultiDayTrip(day.trip_id);
     this.db.run('DELETE FROM days WHERE id = ?', id);
   }
 
@@ -428,6 +436,7 @@ export class DaysService {
    * shifted days have their dates re-stamped (same rules as reorder).
    */
   insert(tripId: string | number, position?: number) {
+    this.requireMultiDayTrip(tripId);
     const rows = this.db.all<{ id: number; day_number: number; date: string | null }>(
       'SELECT id, day_number, date FROM days WHERE trip_id = ? ORDER BY day_number',
       tripId

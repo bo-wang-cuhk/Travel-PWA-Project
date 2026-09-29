@@ -1,3 +1,5 @@
+import TripTypePicker from '../../../components/Trips/TripTypePicker'
+import type { TripType } from '@trek/shared'
 import React, { useEffect, useRef, useState } from 'react'
 import { Archive, ArchiveRestore, Camera, Search, X } from 'lucide-react'
 import { useTranslation } from '../../../i18n'
@@ -59,6 +61,7 @@ export default function MNewTripSheet({ open, trip, onClose, onSave, onCoverUpda
   const canEditTrip = !isEditing || can('trip_edit', trip)
   const canUploadCover = !isEditing || can('trip_cover_upload', trip)
 
+  const [tripType, setTripType] = useState<TripType>('trip')
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [startDate, setStartDate] = useState('')
@@ -77,6 +80,7 @@ export default function MNewTripSheet({ open, trip, onClose, onSave, onCoverUpda
 
   useEffect(() => {
     if (!open) return
+    setTripType(trip?.type ?? 'trip')
     setTitle(trip?.title || '')
     setDescription(trip?.description || '')
     setStartDate(trip?.start_date || '')
@@ -114,18 +118,19 @@ export default function MNewTripSheet({ open, trip, onClose, onSave, onCoverUpda
   const handleSave = async () => {
     setError('')
     if (!title.trim()) { setError(t('dashboard.titleRequired')); return }
-    if (startDate && endDate && new Date(endDate) < new Date(startDate)) {
+    if (tripType !== 'outing' && startDate && endDate && new Date(endDate) < new Date(startDate)) {
       setError(t('dashboard.endDateError')); return
     }
     setIsSaving(true)
     try {
       const result = await onSave({
+        type: tripType,
         title: title.trim(),
         description: description.trim() || null,
         start_date: startDate || null,
-        end_date: endDate || null,
+        end_date: tripType === 'outing' ? startDate || null : endDate || null,
         currency,
-        ...(!startDate && !endDate && !isEditing ? { day_count: 7 } : {}),
+        ...(tripType === 'outing' ? { day_count: 1 } : !startDate && !endDate && !isEditing ? { day_count: 7 } : {}),
       })
       const created = result ? result.trip : undefined
       if (pendingCoverFile && created?.id) {
@@ -256,6 +261,9 @@ export default function MNewTripSheet({ open, trip, onClose, onSave, onCoverUpda
           </div>
         )}
 
+        <TripTypePicker value={tripType} disabled={!canEditTrip}
+          canChooseOuting={!trip || trip.type === 'outing' || trip.day_count === 1}
+          onChange={type => { setTripType(type); if (type === 'outing') setEndDate(startDate) }} />
         <div className={boxCls}>
           <FieldLabel>{t('dashboard.tripTitle')}</FieldLabel>
           <input
@@ -281,16 +289,16 @@ export default function MNewTripSheet({ open, trip, onClose, onSave, onCoverUpda
 
         <div className="mt-2 flex gap-2">
           <div className={`${boxCls} min-w-0 flex-1`}>
-            <FieldLabel>{t('dashboard.startDate')}</FieldLabel>
+            <FieldLabel>{t(tripType === 'outing' ? 'common.date' : 'dashboard.startDate')}</FieldLabel>
             <CustomDatePicker
               value={startDate}
               onChange={v => { if (canEditTrip) changeStart(v) }}
-              placeholder={t('dashboard.startDate')}
+              placeholder={t(tripType === 'outing' ? 'common.date' : 'dashboard.startDate')}
               borderless
               style={{ marginTop: 3 }}
             />
           </div>
-          <div className={`${boxCls} min-w-0 flex-1`}>
+          {tripType !== 'outing' && <div className={`${boxCls} min-w-0 flex-1`}>
             <FieldLabel>{t('dashboard.endDate')}</FieldLabel>
             <CustomDatePicker
               value={endDate}
@@ -299,9 +307,9 @@ export default function MNewTripSheet({ open, trip, onClose, onSave, onCoverUpda
               borderless
               style={{ marginTop: 3 }}
             />
-          </div>
+          </div>}
         </div>
-        {!isEditing && !startDate && !endDate && (
+        {tripType !== 'outing' && !isEditing && !startDate && !endDate && (
           <div className="mt-[6px] px-1 font-geist text-[0.625rem] text-m-faint">{t('dashboard.noDateHint')}</div>
         )}
 

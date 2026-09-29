@@ -1,4 +1,4 @@
-import { continentForCountry, strongerVisitStatus, tripVisitStatus, type VisitStatus } from '@trek/shared'
+import { tripCounts, continentForCountry, strongerVisitStatus, type VisitStatus } from '@trek/shared'
 import { offlineDb } from '../../db/offlineDb'
 import { emptyAtlas, type LocalAtlasRecord } from '../../domain/atlasSyncModel'
 import { useAuthStore } from '../../store/authStore'
@@ -57,15 +57,15 @@ interface ResolvedPlace { id: number; name: string; lat: number; lng: number; tr
 async function localVisits() {
   const trips = (await offlineDb.trips.toArray()).filter(trip => !trip.deleted_at)
   const tripIds = new Set(trips.map(trip => trip.id))
-  const places = (await offlineDb.places.toArray()).filter(place => !place.deleted_at && tripIds.has(place.trip_id) && place.lat != null && place.lng != null)
+  const places = (await offlineDb.places.toArray()).filter(place => !place.deleted_at && place.visit_status === 'visited' && tripIds.has(place.trip_id))
   const resolved: ResolvedPlace[] = []
-  for (const place of places) {
+  for (const place of places.filter(place => place.lat != null && place.lng != null)) {
     try {
       const info = await locatePoint(place.lat!, place.lng!)
       if (info.country_code) resolved.push({ id: place.id, name: place.name, lat: place.lat!, lng: place.lng!, tripId: place.trip_id, code: info.country_code, regionCode: info.region_code, regionName: info.region_name })
     } catch {
       // Missing geometry must not prevent manual marks or the wish list loading.
-      break
+      continue
     }
   }
   return { trips, places, resolved }
@@ -75,8 +75,7 @@ export async function atlasStats(): Promise<AtlasData> {
   const [record, { trips, places, resolved }] = await Promise.all([atlasRecord(), localVisits()])
   const byCode = new Map<string, { places: ResolvedPlace[]; tripIds: Set<number>; status: VisitStatus }>()
   for (const place of resolved) {
-    const trip = trips.find(value => value.id === place.tripId)
-    const status = tripVisitStatus(trip?.start_date, trip?.end_date)
+    const status: VisitStatus = 'visited'
     const current = byCode.get(place.code)
     if (current) { current.places.push(place); current.tripIds.add(place.tripId); current.status = strongerVisitStatus(current.status, status) }
     else byCode.set(place.code, { places: [place], tripIds: new Set([place.tripId]), status })
@@ -93,7 +92,7 @@ export async function atlasStats(): Promise<AtlasData> {
     if (record.hiddenRegions.includes(region.code) || record.hiddenCountries.includes(region.countryCode)) continue
     if (!countries.some(country => country.code === region.countryCode)) countries.push({ code: region.countryCode, placeCount: 0, tripCount: 0, firstVisit: null, lastVisit: null, status: 'visited' })
   }
-  const visible = countries.filter(country => country.placeCount > 0 || !record.hiddenCountries.includes(country.code))
+  const visible = countries.filter(country => !record.hiddenCountries.includes(country.code))
   const visited = visible.filter(country => country.status === 'visited')
   const continents: Record<string, number> = {}
   const continentsPlanned: Record<string, number> = {}
@@ -103,18 +102,17 @@ export async function atlasStats(): Promise<AtlasData> {
     map[continent] = (map[continent] || 0) + 1
   }
   const totalDays = trips.reduce((sum, trip) => trip.start_date && trip.end_date ? sum + Math.max(0, Math.floor((Date.parse(trip.end_date) - Date.parse(trip.start_date)) / 86400000) + 1) : sum, 0)
-  return { footprintPlaces: resolved.map(place => ({ lat: place.lat, lng: place.lng, countryCode: place.code })), countries: visible, stats: { totalTrips: trips.length, totalPlaces: places.length, totalCountries: visited.length, totalDays, totalCountriesPlanned: visible.filter(country => country.status === 'planned').length, totalCountriesIdea: visible.filter(country => country.status === 'idea').length }, mostVisited: [...visited].sort((a,b) => b.tripCount - a.tripCount)[0] || null, continents, continentsPlanned }
+  return { footprintPlaces: [...new Map(resolved.filter(place => !record.hiddenCountries.includes(place.code)).map(place => [`${place.code}:${place.lat}:${place.lng}`, { lat: place.lat, lng: place.lng, countryCode: place.code }])).values()], countries: visible, stats: { ...tripCounts(trips), totalPlaces: places.length, totalCountries: visited.length, totalDays, totalCountriesPlanned: visible.filter(country => country.status === 'planned').length, totalCountriesIdea: visible.filter(country => country.status === 'idea').length }, mostVisited: [...visited].sort((a,b) => b.tripCount - a.tripCount)[0] || null, continents, continentsPlanned }
 }
 
 export async function visitedRegions(): Promise<Record<string, { code: string; name: string; placeCount: number; manuallyMarked?: boolean; status?: VisitStatus }[]>> {
-  const [record, { resolved, trips }] = await Promise.all([atlasRecord(), localVisits()])
+  const [record, { resolved }] = await Promise.all([atlasRecord(), localVisits()])
   const result: Record<string, { code: string; name: string; placeCount: number; manuallyMarked?: boolean; status?: VisitStatus }[]> = {}
   for (const place of resolved) {
     if (!place.regionCode || record.hiddenRegions.includes(place.regionCode) || record.hiddenCountries.includes(place.code)) continue
     const list = result[place.code] ||= []
     const existing = list.find(value => value.code === place.regionCode)
-    const trip = trips.find(value => value.id === place.tripId)
-    const status = tripVisitStatus(trip?.start_date, trip?.end_date)
+    const status: VisitStatus = 'visited'
     if (existing) { existing.placeCount++; existing.status = strongerVisitStatus(existing.status || 'idea', status) }
     else list.push({ code: place.regionCode, name: place.regionName || place.regionCode, placeCount: 1, status })
   }

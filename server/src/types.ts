@@ -27,6 +27,7 @@ export interface User {
 }
 
 export interface Trip {
+  type?: 'trip' | 'outing';
   id: number;
   user_id: number;
   title: string;
@@ -52,6 +53,7 @@ export interface Day {
 }
 
 export interface Place {
+  visit_status?: 'planned' | 'visited' | 'skipped';
   id: number;
   trip_id: number;
   name: string;
@@ -316,6 +318,7 @@ export interface Setting {
 }
 
 export interface AssignmentRow extends DayAssignment {
+  visit_status?: 'planned' | 'visited' | 'skipped';
   place_name: string;
   place_description: string | null;
   lat: number | null;

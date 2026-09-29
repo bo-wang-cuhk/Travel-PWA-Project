@@ -1,6 +1,10 @@
 import type { TranslationStrings } from '../types';
 
 const trip: TranslationStrings = {
+  'trip.mode.trip': 'Seyahat',
+  'trip.mode.outing': 'Günübirlik gezi',
+  'trip.mode.label': 'Tür',
+
   'trip.tabs.plan': 'Planı',
   'trip.tabs.transports': 'Ulaşım',
   'trip.tabs.reservations': 'Rezervasyonlar',

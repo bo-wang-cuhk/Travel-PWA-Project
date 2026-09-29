@@ -55,7 +55,7 @@ export class AssignmentsService {
 
   private getAssignmentWithPlace(assignmentId: number | bigint) {
     const a = this.dbs.get<AssignmentRow>(`
-      SELECT da.*, p.id as place_id, p.name as place_name, p.description as place_description,
+      SELECT da.*, p.id as place_id, p.name as place_name, p.visit_status, p.description as place_description,
         p.lat, p.lng, p.address, p.category_id, p.price, p.currency as place_currency,
         COALESCE(da.assignment_time, p.place_time) as place_time,
         COALESCE(da.assignment_end_time, p.end_time) as end_time,
@@ -127,7 +127,7 @@ export class AssignmentsService {
 
   listDayAssignments(dayId: string | number) {
     const assignments = this.dbs.all<AssignmentRow>(`
-      SELECT da.*, p.id as place_id, p.name as place_name, p.description as place_description,
+      SELECT da.*, p.id as place_id, p.name as place_name, p.visit_status, p.description as place_description,
         p.lat, p.lng, p.address, p.category_id, p.price, p.currency as place_currency,
         COALESCE(da.assignment_time, p.place_time) as place_time,
         COALESCE(da.assignment_end_time, p.end_time) as end_time,

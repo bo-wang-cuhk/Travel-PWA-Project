@@ -1,3 +1,4 @@
+import { useSettingsStore } from '../../store/settingsStore';
 import React from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
@@ -56,6 +57,7 @@ async function mountLoaded(entry = '/dashboard') {
 
 beforeEach(async () => {
   resetAllStores();
+  useSettingsStore.setState(state => ({ settings: { ...state.settings, language: 'en' } }));
   await clearAll();
   await offlineDb.trips.bulkPut([PARIS, TOKYO, ROME]);
   seedStore(useAuthStore, { isAuthenticated: true, user: buildUser() });

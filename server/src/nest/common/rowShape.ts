@@ -25,6 +25,7 @@ export function formatAssignmentWithPlace(a: AssignmentRow, tags: Partial<Tag>[]
     place: {
       id: a.place_id,
       name: a.place_name,
+      visit_status: a.visit_status,
       description: a.place_description,
       lat: a.lat,
       lng: a.lng,

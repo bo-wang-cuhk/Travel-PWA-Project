@@ -168,6 +168,10 @@ export class SyncManager {
 
         if (change.operation === 'delete') {
           if (local) {
+            const parent = await offlineDb.trips.get(local.trip_id)
+            if (parent?.type === 'outing' && !parent.deleted_at && !local.deleted_at) {
+              throw new Error('The only outing day cannot be deleted')
+            }
             const remote = change.payload as SyncedDay | undefined
             const now = remote?.deletedAt || new Date().toISOString()
             await offlineDb.days.put({ ...local, deleted_at: now, updated_at: remote?.updatedAt || now })
@@ -180,7 +184,16 @@ export class SyncManager {
           const trip = await offlineDb.trips.where('sync_id').equals(remote.tripId).first()
           if (!trip || trip.deleted_at) throw new Error(`Parent trip ${remote.tripId} is unavailable for day ${remote.id}`)
           const localId = local?.id ?? await nextLocalDayId()
-          await offlineDb.days.put(applySyncedDay(remote, localId, trip.id))
+          if (trip.type === 'outing') {
+            const days = await offlineDb.days.where('trip_id').equals(trip.id).toArray()
+            if (days.some(day => !day.deleted_at && day.sync_id !== remote.id)) {
+              throw new Error('Outings have exactly one day')
+            }
+          }
+          const day = applySyncedDay(remote, localId, trip.id)
+          await offlineDb.days.put(trip.type === 'outing'
+            ? { ...day, day_number: 1, date: trip.start_date ?? null }
+            : day)
         }
 
         await offlineDb.entitySyncMeta.put({

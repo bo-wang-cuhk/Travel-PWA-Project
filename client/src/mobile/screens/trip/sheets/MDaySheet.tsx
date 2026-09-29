@@ -238,7 +238,7 @@ export default function MDaySheet({ planner, shell }: MTripSheetsProps) {
       })
     : null
   // A day_number of 0 is as unusable as a missing one — both fall back to the row position.
-  const dayLabel = day?.title || t('planner.dayN', { n: day ? day.day_number || dayIndex + 1 : '?' })
+  const dayLabel = day?.title || (planner.trip?.type === 'outing' ? t('trip.mode.outing') : t('planner.dayN', { n: day ? day.day_number || dayIndex + 1 : '?' }))
   const WeatherIcon = weatherIconFor(weather?.main)
 
   const stayBadge = (acc: (typeof dayAccommodations)[number]) => {
@@ -407,7 +407,7 @@ export default function MDaySheet({ planner, shell }: MTripSheetsProps) {
             )}
 
             {/* ── Bookings of the day ── */}
-            {dayReservations.length > 0 && (
+            {planner.trip?.type !== 'outing' && dayReservations.length > 0 && (
               <>
                 <Eyebrow className="mb-[6px] mt-[14px]">{t('day.reservations')}</Eyebrow>
                 <div className="flex flex-col gap-[6px]">
@@ -488,6 +488,7 @@ export default function MDaySheet({ planner, shell }: MTripSheetsProps) {
             )}
 
             {/* ── Accommodation ── */}
+            {planner.trip?.type !== 'outing' && <>
             <Eyebrow className="mb-[6px] mt-[14px]">{t('day.accommodation')}</Eyebrow>
             {dayAccommodations.length > 0 && (
               <div className="flex flex-col gap-2">
@@ -585,6 +586,7 @@ export default function MDaySheet({ planner, shell }: MTripSheetsProps) {
                 {t('day.addAccommodation')}
               </button>
             )}
+            </>}
           </div>
         </>
       )}

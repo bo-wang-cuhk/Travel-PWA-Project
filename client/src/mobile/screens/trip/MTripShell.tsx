@@ -386,7 +386,7 @@ export default function MTripShell({
       )}
 
       {/* ── Day chips (z-25 — covered by non-plan tab overlays, stays mounted) ── */}
-      {days.length > 0 && (
+      {planner.trip?.type !== 'outing' && days.length > 0 && (
         <div className="absolute left-4 right-4 z-[25] flex gap-[6px] top-[calc(var(--m-safe-top,12px)+50px)]">
           <div className="flex flex-1 items-center gap-[2px] overflow-x-auto rounded-full border border-[color:var(--m-gbr)] bg-[color:var(--m-glass)] p-[3px] backdrop-blur-[24px] backdrop-saturate-[1.7]">
             {days.map((day, idx) => {

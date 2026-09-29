@@ -59,6 +59,7 @@ export class PlacesMcp {
     description: 'Add a new place/POI to a trip. Set google_place_id, google_ftid, or osm_id (from search_place) so the app can show opening hours, ratings, and direct Google Maps links. Set price + currency to record the cost so it shows on the item.',
     inputSchema: {
       tripId: z.number().int().positive(),
+      visit_status: z.enum(['planned', 'visited', 'skipped']).optional(),
       name: z.string().min(1).max(200),
       description: z.string().max(2000).optional(),
       lat: z.number().optional(),
@@ -79,8 +80,8 @@ export class PlacesMcp {
     access: { group: 'places', mode: 'write' },
   })
   async createPlace(
-    { tripId, name, description, lat, lng, address, category_id, google_place_id, google_ftid, osm_id, notes, website, phone, image_url, price, currency }: {
-      tripId: number; name: string; description?: string; lat?: number; lng?: number; address?: string;
+    { tripId, visit_status, name, description, lat, lng, address, category_id, google_place_id, google_ftid, osm_id, notes, website, phone, image_url, price, currency }: {
+      tripId: number; visit_status?: 'planned' | 'visited' | 'skipped'; name: string; description?: string; lat?: number; lng?: number; address?: string;
       category_id?: number; google_place_id?: string; google_ftid?: string; osm_id?: string;
       notes?: string; website?: string; phone?: string; image_url?: string; price?: number; currency?: string;
     },
@@ -89,7 +90,7 @@ export class PlacesMcp {
     if (this.auth.isDemoUser(ctx.userId)) return demoDenied();
     if (!this.db.canAccessTrip(tripId, ctx.userId)) return noAccess();
     if (!this.guards.hasTripPermission('place_edit', tripId, ctx.userId)) return permissionDenied();
-    const place = this.places.create(String(tripId), { name, description, lat, lng, address, category_id, google_place_id, google_ftid, osm_id, notes, website, phone, image_url, price, currency });
+    const place = this.places.create(String(tripId), { visit_status, name, description, lat, lng, address, category_id, google_place_id, google_ftid, osm_id, notes, website, phone, image_url, price, currency });
     this.guards.safeBroadcast(tripId, 'place:created', { place });
     return ok({ place });
   }
@@ -100,6 +101,7 @@ export class PlacesMcp {
     inputSchema: {
       tripId: z.number().int().positive(),
       dayId: z.number().int().positive().describe('Day to assign the place to'),
+      visit_status: z.enum(['planned', 'visited', 'skipped']).optional(),
       name: z.string().min(1).max(200),
       description: z.string().max(2000).optional(),
       lat: z.number().optional(),
@@ -121,8 +123,8 @@ export class PlacesMcp {
     access: { group: 'places', mode: 'write' },
   })
   async createAndAssignPlace(
-    { tripId, dayId, name, description, lat, lng, address, category_id, google_place_id, google_ftid, osm_id, place_notes, website, phone, image_url, assignment_notes, price, currency }: {
-      tripId: number; dayId: number; name: string; description?: string; lat?: number; lng?: number; address?: string;
+    { tripId, dayId, visit_status, name, description, lat, lng, address, category_id, google_place_id, google_ftid, osm_id, place_notes, website, phone, image_url, assignment_notes, price, currency }: {
+      tripId: number; visit_status?: 'planned' | 'visited' | 'skipped'; dayId: number; name: string; description?: string; lat?: number; lng?: number; address?: string;
       category_id?: number; google_place_id?: string; google_ftid?: string; osm_id?: string;
       place_notes?: string; website?: string; phone?: string; image_url?: string; assignment_notes?: string;
       price?: number; currency?: string;
@@ -135,7 +137,7 @@ export class PlacesMcp {
     if (!this.assignments.dayExists(dayId, tripId)) return { content: [{ type: 'text' as const, text: 'Day not found.' }], isError: true };
     try {
       const result = this.db.transaction(() => {
-        const place = this.places.create(String(tripId), { name, description, lat, lng, address, category_id, google_place_id, google_ftid, osm_id, notes: place_notes, website, phone, image_url, price, currency });
+        const place = this.places.create(String(tripId), { visit_status, name, description, lat, lng, address, category_id, google_place_id, google_ftid, osm_id, notes: place_notes, website, phone, image_url, price, currency });
         const assignment = this.assignments.createAssignment(dayId, place.id, assignment_notes ?? null);
         return { place, assignment };
       });
@@ -154,6 +156,7 @@ export class PlacesMcp {
     inputSchema: {
       tripId: z.number().int().positive(),
       placeId: z.number().int().positive(),
+      visit_status: z.enum(['planned', 'visited', 'skipped']).optional(),
       name: z.string().min(1).max(200).optional(),
       description: z.string().max(2000).optional(),
       lat: z.number().optional(),
@@ -178,8 +181,8 @@ export class PlacesMcp {
     access: { group: 'places', mode: 'write' },
   })
   async updatePlace(
-    { tripId, placeId, name, description, lat, lng, address, category_id, price, currency, place_time, end_time, duration_minutes, notes, website, phone, image_url, transport_mode, osm_id, google_place_id, google_ftid }: {
-      tripId: number; placeId: number; name?: string; description?: string; lat?: number; lng?: number;
+    { tripId, placeId, visit_status, name, description, lat, lng, address, category_id, price, currency, place_time, end_time, duration_minutes, notes, website, phone, image_url, transport_mode, osm_id, google_place_id, google_ftid }: {
+      tripId: number; visit_status?: 'planned' | 'visited' | 'skipped'; placeId: number; name?: string; description?: string; lat?: number; lng?: number;
       address?: string; category_id?: number; price?: number; currency?: string; place_time?: string;
       end_time?: string; duration_minutes?: number; notes?: string; website?: string; phone?: string;
       image_url?: string | null;
@@ -191,7 +194,7 @@ export class PlacesMcp {
     if (this.auth.isDemoUser(ctx.userId)) return demoDenied();
     if (!this.db.canAccessTrip(tripId, ctx.userId)) return noAccess();
     if (!this.guards.hasTripPermission('place_edit', tripId, ctx.userId)) return permissionDenied();
-    const place = await this.places.update(String(tripId), String(placeId), { name, description, lat, lng, address, category_id, price, currency, place_time, end_time, duration_minutes, notes, website, phone, image_url, transport_mode, osm_id, google_place_id, google_ftid });
+    const place = await this.places.update(String(tripId), String(placeId), { visit_status, name, description, lat, lng, address, category_id, price, currency, place_time, end_time, duration_minutes, notes, website, phone, image_url, transport_mode, osm_id, google_place_id, google_ftid });
     if (!place) return { content: [{ type: 'text' as const, text: 'Place not found.' }], isError: true };
     this.guards.safeBroadcast(tripId, 'place:updated', { place });
     return ok({ place });

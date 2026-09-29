@@ -1,6 +1,10 @@
 import type { TranslationStrings } from '../types';
 
 const trip: TranslationStrings = {
+  'trip.mode.trip': 'Путешествие',
+  'trip.mode.outing': 'Однодневная поездка',
+  'trip.mode.label': 'Тип',
+
   'trip.tabs.plan': 'План',
   'trip.tabs.transports': 'Транспорт',
   'trip.tabs.reservations': 'Бронирования',

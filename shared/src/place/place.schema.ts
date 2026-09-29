@@ -162,10 +162,10 @@ export const assignmentPlaceSchema = z.object({
 });
 export type AssignmentPlace = z.infer<typeof assignmentPlaceSchema>;
 
-export const placeCreateRequestSchema = open.and(z.object({ name: z.string().min(1) }));
+export const placeCreateRequestSchema = open.and(z.object({ name: z.string().min(1), visit_status: placeVisitStatusSchema.optional() }));
 export type PlaceCreateRequest = z.infer<typeof placeCreateRequestSchema>;
 
-export const placeUpdateRequestSchema = open;
+export const placeUpdateRequestSchema = open.and(z.object({ visit_status: placeVisitStatusSchema.optional() }));
 export type PlaceUpdateRequest = z.infer<typeof placeUpdateRequestSchema>;
 
 // Collaborative ratings (#1435): one 1-5 star vote per user and place.

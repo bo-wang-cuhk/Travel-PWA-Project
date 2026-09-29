@@ -1,6 +1,9 @@
 import type { TranslationStrings } from '../types';
 
 const atlas: TranslationStrings = {
+  'atlas.viewMode': 'Zobrazení mapy',
+  'atlas.viewMode.china': 'Čína',
+  'atlas.viewMode.global': 'Celý svět',
   'atlas.subtitle': 'Vaše stopa ve světě',
   'atlas.countries': 'Země',
   'atlas.trips': 'Cesty',

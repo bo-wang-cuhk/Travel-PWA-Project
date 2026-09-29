@@ -73,7 +73,7 @@ export default function MPlanTimeline({ planner, shell }: MPlanTimelineProps) {
   }
   // Mirrors MDaySheet's own label so the pill and the sheet it opens agree.
   const dayLabel = day
-    ? day.title || t('planner.dayN', { n: day.day_number || planner.days.indexOf(day) + 1 })
+    ? day.title || (trip?.type === 'outing' ? t('trip.mode.outing') : t('planner.dayN', { n: day.day_number || planner.days.indexOf(day) + 1 }))
     : ''
   const dayScheduleFor = (anchor: 'assignment' | 'reservation', id: number) =>
     (dayId != null
@@ -164,6 +164,7 @@ export default function MPlanTimeline({ planner, shell }: MPlanTimelineProps) {
         {day && (
           <TimelineHeader
             tl={tl}
+            showStays={trip?.type !== 'outing'}
             // Edit mode already names the day in its own header a row above, so
             // the pill drops to icon-only there rather than saying it twice.
             dayLabel={editing ? '' : dayLabel}
@@ -179,12 +180,13 @@ export default function MPlanTimeline({ planner, shell }: MPlanTimelineProps) {
           />
         )}
 
-        {tl.hotelLegs.top && (
+        {trip?.type !== 'outing' && tl.hotelLegs.top && (
           <HotelConnRow seg={tl.hotelLegs.top.seg} name={tl.hotelLegs.top.name} placement="top" />
         )}
         {dayId != null && daySchedule.byPosition[dayId]?.start.map(si => <PlanScheduleRow key={`${si.pluginId}:${si.id}`} item={si} />)}
 
         {day && tl.rows.map(row => {
+          if (trip?.type === 'outing' && (row.kind === 'transport' || row.kind === 'transit') && row.res.type === 'flight') return null
           switch (row.kind) {
             case 'place':
               return (
@@ -257,7 +259,7 @@ export default function MPlanTimeline({ planner, shell }: MPlanTimelineProps) {
         })}
 
         {dayId != null && daySchedule.byPosition[dayId]?.end.map(si => <PlanScheduleRow key={`${si.pluginId}:${si.id}`} item={si} />)}
-        {tl.hotelLegs.bottom && (
+        {trip?.type !== 'outing' && tl.hotelLegs.bottom && (
           <HotelConnRow seg={tl.hotelLegs.bottom.seg} name={tl.hotelLegs.bottom.name} placement="bottom" />
         )}
 
@@ -276,8 +278,8 @@ export default function MPlanTimeline({ planner, shell }: MPlanTimelineProps) {
               label={t('mobileTrip.addNoteShort')}
               onClick={() => day && shell.openSheet('note', { dayId: day.id })}
             />
-            <PlanAction icon={Ticket} label={t('mobileTrip.addBookingShort')} onClick={tl.addBooking} />
-            <PlanAction icon={TrainFront} label={t('mobileTrip.addTransportShort')} onClick={tl.addTransport} />
+            {planner.trip?.type !== 'outing' && <PlanAction icon={Ticket} label={t('mobileTrip.addBookingShort')} onClick={tl.addBooking} />}
+            {planner.trip?.type !== 'outing' && <PlanAction icon={TrainFront} label={t('mobileTrip.addTransportShort')} onClick={tl.addTransport} />}
             <PlanAction icon={Route} label={t('dayplan.optimize')} onClick={() => void tl.optimize()} />
             <PlanAction icon={GoogleMapsIcon} label={t('mobileTrip.googleMaps')} onClick={tl.exportGoogleMaps} />
             <PlanAction icon={Compass} label={t('mobileTrip.coMaps')} onClick={tl.exportCoMaps} />
@@ -387,14 +389,14 @@ function EditHeader({ tl, planner, shell }: {
           >
             <Pencil size={14} strokeWidth={2} />
           </button>
-          <button
+          {planner.trip?.type !== 'outing' && <button
             type="button"
             aria-label={t('dayplan.reorderDays')}
             onClick={() => shell.openSheet('days')}
             className="flex-none text-m-faint"
           >
             <CalendarRange size={14} strokeWidth={2} />
-          </button>
+          </button>}
         </>
       )}
       <button
@@ -421,8 +423,9 @@ function EditHeader({ tl, planner, shell }: {
  * the stay chips have a target of their own: tapping a hotel opens that stay,
  * not the day (#2210). Only the weather chip still shares the day pill's target.
  */
-function TimelineHeader({ tl, dayLabel, openLabel, weatherLabel, onOpenDay, onOpenStay, stayLabel }: {
+function TimelineHeader({ tl, showStays = true, dayLabel, openLabel, weatherLabel, onOpenDay, onOpenStay, stayLabel }: {
   tl: MPlanTimelineController
+  showStays?: boolean
   dayLabel: string
   openLabel: string
   /** Weather-chip label naming the forecast's anchor place (#2167); falls back to openLabel. */
@@ -448,7 +451,7 @@ function TimelineHeader({ tl, dayLabel, openLabel, weatherLabel, onOpenDay, onOp
           {dayLabel}
           <ChevronRight size={11} strokeWidth={2.4} aria-hidden="true" className="text-m-faint" />
         </button>
-        {tl.hotelChips.map(chip => (
+        {showStays && tl.hotelChips.map(chip => (
           <button
             key={chip.key}
             type="button"

@@ -68,9 +68,10 @@ function tripFromCreate(
     sync_id: randomId(),
     user_id: owner?.id ?? 0,
     title: data.title,
+    type: data.type ?? 'trip',
     description: data.description ?? null,
-    start_date: data.start_date ?? null,
-    end_date: data.end_date ?? null,
+    start_date: data.type === 'outing' ? data.start_date ?? data.end_date ?? null : data.start_date ?? null,
+    end_date: data.type === 'outing' ? data.start_date ?? data.end_date ?? null : data.end_date ?? null,
     currency: data.currency ?? 'CNY',
     cover_image: null,
     is_archived: 0,
@@ -78,7 +79,7 @@ function tripFromCreate(
     created_at: now,
     updated_at: now,
     deleted_at: null,
-    day_count: inclusiveDayCount(data.start_date, data.end_date) ?? data.day_count ?? 7,
+    day_count: data.type === 'outing' ? 1 : inclusiveDayCount(data.start_date, data.end_date) ?? data.day_count ?? 7,
     place_count: 0,
     is_owner: 1,
     owner_username: owner?.username ?? undefined,
@@ -148,6 +149,7 @@ async function displayTrip<T extends Trip>(
   const owner = cachedMembers.find(member => member.role === 'owner' || member.id === trip.user_id)
   return {
     ...trip,
+    type: trip.type ?? 'trip',
     cover_image: await resolveStoredFileUrl(trip.cover_image),
     place_count: activePlaces.length,
     shared_count: cachedMembers.length > 0 ? companionCount(trip, cachedMembers) : (trip.shared_count ?? 0),
@@ -194,7 +196,7 @@ export const tripRepo = {
     const trip = pickActive(all.filter(t => !t.is_archived))
     return {
       trip: trip
-        ? { id: trip.id, title: trip.title, start_date: trip.start_date, end_date: trip.end_date }
+        ? { id: trip.id, title: trip.title, type: trip.type ?? 'trip', start_date: trip.start_date, end_date: trip.end_date }
         : null,
     }
   },
@@ -253,13 +255,23 @@ export const tripRepo = {
       if (!current || current.deleted_at) throw new Error('Trip not found in local database')
       const { date_shift_mode: _dateShiftMode, ...patch } = data
       void _dateShiftMode
-      const nextStart = patch.start_date === undefined ? current.start_date : patch.start_date
-      const nextEnd = patch.end_date === undefined ? current.end_date : patch.end_date
-      const desiredDayCount = inclusiveDayCount(nextStart, nextEnd) ?? patch.day_count ?? current.day_count ?? 0
+      const nextType = patch.type ?? current.type ?? 'trip'
+      const activeDays = (await offlineDb.days.where('trip_id').equals(id).toArray()).filter(day => !day.deleted_at)
+      if (nextType === 'outing' && current.type !== 'outing' && activeDays.length !== 1) {
+        throw new Error('Only trips with one day can become outings')
+      }
+      const nextStart = nextType === 'outing'
+        ? (patch.start_date !== undefined ? patch.start_date : patch.end_date !== undefined ? patch.end_date : current.start_date ?? current.end_date) ?? null
+        : patch.start_date === undefined ? current.start_date : patch.start_date
+      const nextEnd = nextType === 'outing' ? nextStart : patch.end_date === undefined ? current.end_date : patch.end_date
+      const desiredDayCount = nextType === 'outing' ? 1 : inclusiveDayCount(nextStart, nextEnd) ?? patch.day_count ?? current.day_count ?? 0
       const now = new Date().toISOString()
       const trip: LocalTripRecord = {
         ...current,
         ...patch,
+        type: nextType,
+        start_date: nextStart,
+        end_date: nextEnd,
         sync_id: current.sync_id || randomId(),
         created_at: current.created_at || new Date().toISOString(),
         deleted_at: current.deleted_at ?? null,
@@ -272,7 +284,7 @@ export const tripRepo = {
       await offlineDb.trips.put(trip)
       await markLocalChange('trip', trip.sync_id, 'upsert')
 
-      const dayGridChanged = patch.start_date !== undefined || patch.end_date !== undefined || patch.day_count !== undefined
+      const dayGridChanged = patch.type !== undefined || patch.start_date !== undefined || patch.end_date !== undefined || patch.day_count !== undefined
       if (dayGridChanged) {
         const days = (await offlineDb.days.where('trip_id').equals(id).toArray())
           .filter(day => !day.deleted_at)

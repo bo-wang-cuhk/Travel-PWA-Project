@@ -4257,6 +4257,18 @@ function runMigrations(db: Database.Database): void {
         db.exec('ALTER TABLE journey_entries ADD COLUMN stats_excluded INTEGER NOT NULL DEFAULT 0');
       }
     },
+    () => {
+      const cols = db.prepare("SELECT name FROM pragma_table_info('trips')").all() as Array<{ name: string }>;
+      if (!cols.some(c => c.name === 'type')) {
+        db.exec("ALTER TABLE trips ADD COLUMN type TEXT NOT NULL DEFAULT 'trip' CHECK (type IN ('trip', 'outing'))");
+      }
+    },
+    () => {
+      const cols = db.prepare("SELECT name FROM pragma_table_info('places')").all() as Array<{ name: string }>;
+      if (!cols.some(c => c.name === 'visit_status')) {
+        db.exec("ALTER TABLE places ADD COLUMN visit_status TEXT NOT NULL DEFAULT 'planned' CHECK (visit_status IN ('planned', 'visited', 'skipped'))");
+      }
+    },
   ];
 
   if (currentVersion < migrations.length) {

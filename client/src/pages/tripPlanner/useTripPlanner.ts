@@ -74,6 +74,11 @@ export function useTripPlanner() {
   const files = useTripStore(s => s.files)
   const selectedDayId = useTripStore(s => s.selectedDayId)
   const isLoading = useTripStore(s => s.isLoading)
+  useEffect(() => {
+    if (trip?.type === 'outing' && days.length === 1 && selectedDayId !== days[0].id) {
+      useTripStore.getState().setSelectedDay(days[0].id)
+    }
+  }, [trip?.type, days, selectedDayId])
   // Actions — stable references, don't cause re-renders
   const tripActions = useRef(useTripStore.getState()).current
   const can = useCanDo()
@@ -151,7 +156,7 @@ export function useTripPlanner() {
     ...(enabledAddons.budget ? [{ id: 'finanzplan', label: t(TRIP_TAB_LABEL_KEYS.finanzplan), icon: Wallet }] : []),
     ...(enabledAddons.documents ? [{ id: 'dateien', label: t(TRIP_TAB_LABEL_KEYS.dateien), icon: FolderOpen }] : []),
     ...(enabledAddons.collab ? [{ id: 'collab', label: t(TRIP_TAB_LABEL_KEYS.collab), icon: Users }] : []),
-  ].filter(tab => tab.id === 'plan' || !replacedTabs.has(tab.id))
+  ].filter(tab => (tab.id === 'plan' || !replacedTabs.has(tab.id)) && (trip?.type !== 'outing' || !['transports', 'buchungen'].includes(tab.id)))
   // Positioned plugin tabs splice in ascending order so two positions stay stable;
   // the rest append, exactly as before this capability existed.
   const positioned = tripPagePlugins.filter(p => p.tripPage?.position != null).sort((a, b) => (a.tripPage!.position! - b.tripPage!.position!))
@@ -182,7 +187,7 @@ export function useTripPlanner() {
       setActiveTab('plan')
       sessionStorage.setItem(`trip-tab-${tripId}`, 'plan')
     }
-  }, [activeTab, enabledAddons, addonsLoaded, tripPluginIds, pluginsLoaded])
+  }, [trip?.type, activeTab, enabledAddons, addonsLoaded, tripPluginIds, pluginsLoaded])
 
   const handleTabChange = (rawTabId: string): void => {
     // A core tab a plugin replaced is gone from the bar, but a programmatic jump

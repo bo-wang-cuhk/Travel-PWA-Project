@@ -1,3 +1,5 @@
+import TripTypePicker from './TripTypePicker'
+import type { TripType } from '@trek/shared'
 import { useState, useEffect, useRef } from 'react'
 import Modal from '../shared/Modal'
 import { Calendar, Camera, Search, X, UserPlus, Bell } from 'lucide-react'
@@ -56,6 +58,7 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
   const canUploadCover = !isEditing || can('trip_cover_upload', trip)
   const canEditTrip = !isEditing || can('trip_edit', trip)
 
+  const [tripType, setTripType] = useState<TripType>('trip')
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -90,6 +93,7 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
   const [dateShiftMode, setDateShiftMode] = useState<DateShiftMode>('keep_bookings')
 
   useEffect(() => {
+    setTripType(trip?.type ?? 'trip')
     if (trip) {
       const rd = trip.reminder_days ?? 3
       setFormData({
@@ -159,28 +163,29 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
     e.preventDefault()
     setError('')
     if (!formData.title.trim()) { setError(t('dashboard.titleRequired')); return }
-    if (formData.start_date && formData.end_date && new Date(formData.end_date) < new Date(formData.start_date)) {
+    if (tripType !== 'outing' && formData.start_date && formData.end_date && new Date(formData.end_date) < new Date(formData.start_date)) {
       setError(t('dashboard.endDateError')); return
     }
-    if (!formData.start_date && !formData.end_date) {
+    if (tripType !== 'outing' && !formData.start_date && !formData.end_date) {
       const dc = Number(formData.day_count)
       if (formData.day_count === '' || !Number.isInteger(dc) || dc < 1 || dc > 365) {
         setError(t('dashboard.dayCountRequired')); return
       }
     }
     const payload: TripCreateRequest & { date_shift_mode?: DateShiftMode } = {
+      type: tripType,
       title: formData.title.trim(),
       description: formData.description.trim() || null,
       start_date: formData.start_date || null,
-      end_date: formData.end_date || null,
+      end_date: tripType === 'outing' ? formData.start_date || null : formData.end_date || null,
       currency: formData.currency,
       reminder_days: formData.reminder_days,
-      ...(!formData.start_date && !formData.end_date ? { day_count: Number(formData.day_count) } : {}),
+      ...(tripType === 'outing' ? { day_count: 1 } : !formData.start_date && !formData.end_date ? { day_count: Number(formData.day_count) } : {}),
     }
     // Moving the start of a dated trip shifts the whole day grid, so let the user
     // choose how bookings follow before anything is saved (#1288). End-date-only
     // changes don't shift days and dateless transitions have nothing to shift.
-    if (isEditing && trip?.start_date && trip?.end_date
+    if (tripType !== 'outing' && isEditing && trip?.start_date && trip?.end_date
       && payload.start_date && payload.end_date && payload.start_date !== trip.start_date) {
       setDateShiftMode('keep_bookings')
       setPendingDateShift(payload)
@@ -523,6 +528,9 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
         </div>}
 
         <div className={`${panelCls} flex-1`}>
+          <TripTypePicker value={tripType} disabled={!canEditTrip}
+            canChooseOuting={!trip || trip.type === 'outing' || trip.day_count === 1}
+            onChange={type => { setTripType(type); if (type === 'outing') setFormData(prev => ({ ...prev, end_date: prev.start_date, day_count: 1 })) }} />
           <div>
             <label className={labelCls}>
               {t('dashboard.tripTitle')} <span className="text-danger">*</span>
@@ -552,19 +560,19 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
         <div className="grid grid-cols-2 gap-3">
           <div className="min-w-0">
             <label className={labelCls}>
-              <Calendar className="w-3.5 h-3.5" />{t('dashboard.startDate')}
+              <Calendar className="w-3.5 h-3.5" />{t(tripType === 'outing' ? 'common.date' : 'dashboard.startDate')}
             </label>
-            <CustomDatePicker value={formData.start_date} onChange={v => update('start_date', v)} placeholder={t('dashboard.startDate')} />
+            <CustomDatePicker value={formData.start_date} onChange={v => update('start_date', v)} placeholder={t(tripType === 'outing' ? 'common.date' : 'dashboard.startDate')} />
           </div>
-          <div className="min-w-0">
+          {tripType !== 'outing' && <div className="min-w-0">
             <label className={labelCls}>
               <Calendar className="w-3.5 h-3.5" />{t('dashboard.endDate')}
             </label>
             <CustomDatePicker value={formData.end_date} onChange={v => update('end_date', v)} placeholder={t('dashboard.endDate')} />
-          </div>
+          </div>}
         </div>
 
-        {!formData.start_date && !formData.end_date && (
+        {tripType !== 'outing' && !formData.start_date && !formData.end_date && (
           <div>
             <label className={labelCls}>
               {t('dashboard.dayCount')}

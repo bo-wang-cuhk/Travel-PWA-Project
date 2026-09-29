@@ -38,7 +38,7 @@ describe('local-first Atlas repository', () => {
 
   it('derives country counts from local Trips and Places without the TREK Server', async () => {
     await offlineDb.trips.put({ id: -1, sync_id: 'trip-1', user_id: 0, title: 'Tokyo', description: null, start_date: '2020-01-01', end_date: '2020-01-03', currency: 'CNY', cover_image: null, is_archived: 0, reminder_days: 0, day_count: 0, place_count: 1, is_owner: 1, shared_count: 0, created_at: '2020-01-01', updated_at: '2020-01-01', deleted_at: null })
-    await offlineDb.places.put({ id: -1, sync_id: 'place-1', trip_id: -1, trip_sync_id: 'trip-1', name: 'Tokyo Tower', lat: 35.6, lng: 139.7, created_at: '2020-01-01', updated_at: '2020-01-01', deleted_at: null } as any)
+    await offlineDb.places.put({ id: -1, sync_id: 'place-1', trip_id: -1, trip_sync_id: 'trip-1', name: 'Tokyo Tower', visit_status: 'visited', lat: 35.6, lng: 139.7, created_at: '2020-01-01', updated_at: '2020-01-01', deleted_at: null } as any)
     const data = await atlasStats()
     expect(data.countries).toMatchObject([{ code: 'JP', placeCount: 1, tripCount: 1, status: 'visited' }])
     expect(data.stats).toMatchObject({ totalTrips: 1, totalPlaces: 1, totalCountries: 1, totalDays: 3 })

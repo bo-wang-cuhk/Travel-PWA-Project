@@ -1,3 +1,4 @@
+import TripModeFilter from '../../../components/Trips/TripModeFilter'
 import React, { useEffect, useState } from 'react'
 import {
   Archive, ArchiveRestore, ArrowRight, Bell, CalendarDays, CalendarPlus, Copy,
@@ -58,7 +59,7 @@ export default function MDashboard(): React.ReactElement {
   const {
     demoMode, locale, t, navigate,
     spotlight, upcoming, gridTrips, isLoading, loadError, retryLoad,
-    tripFilter, setTripFilter, viewMode, toggleViewMode,
+    tripMode, setTripMode, tripFilter, setTripFilter, viewMode, toggleViewMode,
     showForm, setShowForm, editingTrip, setEditingTrip,
     deleteTrip, setDeleteTrip, copyTrip, setCopyTrip, applyCoverUpdate,
     handleCreate, handleUpdate, confirmDelete, handleArchive, handleUnarchive, confirmCopy,
@@ -133,6 +134,7 @@ export default function MDashboard(): React.ReactElement {
     }
     return (
       <>
+        <TripModeFilter value={tripMode} onChange={setTripMode} />
         <div className="mt-[14px] flex items-center gap-[7px]">
           {/* The chips scroll inside their own box on narrow viewports or large
               system font scales; without it this row was the widest thing on
@@ -510,8 +512,8 @@ function MTripGridCard({ trip, locale, badge, pluginBadges, actions, onOpen }: {
           <div className="min-w-0 flex-1 truncate text-[0.875rem] font-semibold">{trip.title}</div>
           <span className="inline-flex flex-none items-center gap-[6px] rounded-full bg-[color:var(--m-ic)] px-[10px] py-1 font-geist text-[0.6875rem] font-semibold text-m-ink">
             <span>{fullDate(trip.start_date, locale) ?? '—'}</span>
-            <ArrowRight size={12} strokeWidth={2.2} className="text-m-faint" />
-            <span>{fullDate(trip.end_date, locale) ?? '—'}</span>
+            {trip.type !== 'outing' && <ArrowRight size={12} strokeWidth={2.2} className="text-m-faint" />}
+            {trip.type !== 'outing' && <span>{fullDate(trip.end_date, locale) ?? '—'}</span>}
           </span>
         </div>
         <MTripBadges items={pluginBadges} />
@@ -548,12 +550,12 @@ function MTripListCard({ trip, locale, t, badge, pluginBadges, actions, onOpen }
           <div className="inline-flex items-center gap-[9px] rounded-full bg-[color:var(--m-ic)] px-[15px] py-[7px] text-[0.875rem] font-medium">
             <span>{fullDate(trip.start_date, locale) ?? '—'}</span>
             <ArrowRight size={15} strokeWidth={2.2} className="text-m-faint" />
-            <span>{fullDate(trip.end_date, locale) ?? '—'}</span>
+            {trip.type !== 'outing' && <span>{fullDate(trip.end_date, locale) ?? '—'}</span>}
           </div>
         </div>
         <div className="my-[13px] h-px bg-[color:var(--m-rowbr)]" />
         <div className="flex text-center">
-          <ListStat value={trip.day_count ?? 0} label={t('dashboard.days')} />
+          <ListStat value={trip.day_count ?? 0} label={t(trip.type === 'outing' ? 'trip.mode.outing' : 'dashboard.days')} />
           <ListStat value={trip.place_count ?? 0} label={t('dashboard.places')} />
           <ListStat value={trip.shared_count ?? 0} label={trip.shared_count === 1 ? t('dashboard.card.buddyOne') : t('dashboard.members')} />
         </div>

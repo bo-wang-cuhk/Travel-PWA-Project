@@ -1725,7 +1725,7 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
                     <span style={{ fontSize: 'calc(14px * var(--fs-scale-body, 1))', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 1, minWidth: 0 }}>
-                      {day.title || t('dayplan.dayN', { n: index + 1 })}
+                      {day.title || (trip?.type === 'outing' ? t('trip.mode.outing') : t('dayplan.dayN', { n: index + 1 }))}
                     </span>
                     {formattedDate && (
                       <>
@@ -1802,7 +1802,7 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar(props: DayPlanSidebarP
                             <TramFront size={14} strokeWidth={1.8} />
                           </button>
                         ) : <div style={{ borderRight: div, borderBottom: div }} />}
-                        {onAddTransport ? (
+                        {trip?.type !== 'outing' && onAddTransport ? (
                           <button type="button" onClick={e => { e.stopPropagation(); onAddTransport(day.id) }} title={t('transport.addTransport')} style={{ ...cell, border: 'none', borderBottom: div }}>
                             <Plus size={14} strokeWidth={1.8} />
                           </button>

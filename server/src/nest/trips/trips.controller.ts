@@ -82,8 +82,8 @@ export class TripsController {
   active(@CurrentUser() user: User): ActiveTripResponse {
     const row = this.trips.activeTrip(user.id);
     if (!row) return { trip: null };
-    const { id, title, start_date, end_date } = row;
-    return { trip: { id, title, start_date, end_date } };
+    const { id, title, start_date, end_date, type } = row;
+    return { trip: { id, title, start_date, end_date, type } };
   }
 
   @Get('cover-images/search')
@@ -108,16 +108,17 @@ export class TripsController {
       throw new HttpException({ error: 'No permission to create trips' }, 403);
     }
     // Presence/shape validation happens in the ZodValidationPipe (tripCreateRequestSchema).
-    const { title, description, currency, reminder_days, day_count } = body;
+    const { title, description, currency, reminder_days, day_count, type } = body;
     let start_date: string | null = body.start_date || null;
     let end_date: string | null = body.end_date || null;
-    if (start_date && !end_date) end_date = toDateStr(addDays(new Date(start_date), 6));
+    if (type === 'outing') start_date = end_date = start_date ?? end_date;
+    else if (start_date && !end_date) end_date = toDateStr(addDays(new Date(start_date), 6));
     else if (!start_date && end_date) start_date = toDateStr(addDays(new Date(end_date), -6));
     if (start_date && end_date && new Date(end_date) < new Date(start_date)) {
       throw new HttpException({ error: 'End date must be after start date' }, 400);
     }
     const parsedDayCount = day_count ? Math.min(Math.max(Number(day_count) || 7, 1), 365) : undefined;
-    const { trip, tripId, reminderDays } = this.trips.create(user.id, { title, description, start_date, end_date, currency, reminder_days, day_count: parsedDayCount });
+    const { trip, tripId, reminderDays } = this.trips.create(user.id, { type, title, description, start_date, end_date, currency, reminder_days, day_count: parsedDayCount });
     this.audit.writeAudit({ userId: user.id, action: 'trip.create', ip: getClientIp(req), details: { tripId, title, reminder_days: reminderDays === 0 ? 'none' : `${reminderDays} days` } });
     if (reminderDays > 0) logInfo(`${user.email} set ${reminderDays}-day reminder for trip "${title}"`);
     return { trip };
@@ -146,7 +147,7 @@ export class TripsController {
     if (body.cover_image !== undefined && !this.trips.can('trip_cover_upload', user.role, ownerId, user.id, isMember)) {
       throw new HttpException({ error: 'No permission to change cover image' }, 403);
     }
-    const editFields = ['title', 'description', 'start_date', 'end_date', 'currency', 'reminder_days', 'day_count'];
+    const editFields = ['type', 'title', 'description', 'start_date', 'end_date', 'currency', 'reminder_days', 'day_count'];
     if (editFields.some((f) => body[f] !== undefined) && !this.trips.can('trip_edit', user.role, ownerId, user.id, isMember)) {
       throw new HttpException({ error: 'No permission to edit this trip' }, 403);
     }

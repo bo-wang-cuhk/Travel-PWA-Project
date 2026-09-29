@@ -83,6 +83,7 @@ export class TripsMcp {
     name: 'create_trip',
     description: 'Create a new trip. Returns the created trip with its generated days.',
     inputSchema: {
+      type: z.enum(['trip', 'outing']).optional(),
       title: z.string().min(1).max(200).describe('Trip title'),
       description: z.string().max(2000).optional().describe('Trip description'),
       start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Start date (YYYY-MM-DD)'),
@@ -97,7 +98,8 @@ export class TripsMcp {
     access: { group: 'trips', mode: 'write' },
   })
   async createTrip(
-    { title, description, start_date, end_date, currency, day_count, reminder_days }: {
+    { type, title, description, start_date, end_date, currency, day_count, reminder_days }: {
+      type?: 'trip' | 'outing';
       title: string; description?: string; start_date?: string; end_date?: string; currency?: string;
       day_count?: number; reminder_days?: number;
     },
@@ -117,7 +119,7 @@ export class TripsMcp {
     if (start_date && end_date && new Date(end_date) < new Date(start_date)) {
       return { content: [{ type: 'text' as const, text: 'End date must be after start date.' }], isError: true };
     }
-    const { trip } = this.trips.create(ctx.userId, { title, description, start_date, end_date, currency, day_count, reminder_days }, MAX_MCP_TRIP_DAYS);
+    const { trip } = this.trips.create(ctx.userId, { type, title, description, start_date, end_date, currency, day_count, reminder_days }, MAX_MCP_TRIP_DAYS);
     return ok({ trip });
   }
 
@@ -126,6 +128,7 @@ export class TripsMcp {
     description: 'Update an existing trip\'s details.',
     inputSchema: {
       tripId: z.number().int().positive(),
+      type: z.enum(['trip', 'outing']).optional(),
       title: z.string().min(1).max(200).optional(),
       description: z.string().max(2000).nullable().optional().describe('Trip description; null removes it'),
       start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -146,8 +149,8 @@ export class TripsMcp {
     access: { group: 'trips', mode: 'write' },
   })
   async updateTrip(
-    { tripId, title, description, start_date, end_date, clear_dates, currency, is_archived, cover_image, day_count, reminder_days, date_shift_mode }: {
-      tripId: number; title?: string; description?: string | null; start_date?: string; end_date?: string;
+    { tripId, type, title, description, start_date, end_date, clear_dates, currency, is_archived, cover_image, day_count, reminder_days, date_shift_mode }: {
+      tripId: number; type?: 'trip' | 'outing'; title?: string; description?: string | null; start_date?: string; end_date?: string;
       clear_dates?: boolean; currency?: string; is_archived?: boolean; cover_image?: string | null;
       day_count?: number; reminder_days?: number; date_shift_mode?: 'keep_bookings' | 'shift_all';
     },
@@ -177,7 +180,7 @@ export class TripsMcp {
       : { start_date, end_date };
     // update() re-anchors the budget before the trip row moves off the old
     // currency (#1543) and then runs the legacy updateTrip core.
-    const { updatedTrip } = await this.trips.update(tripId, ctx.userId, { title, description, ...dates, currency, is_archived, cover_image, day_count, reminder_days, date_shift_mode }, 'user');
+    const { updatedTrip } = await this.trips.update(tripId, ctx.userId, { type, title, description, ...dates, currency, is_archived, cover_image, day_count, reminder_days, date_shift_mode }, 'user');
     this.guards.safeBroadcast(tripId, 'trip:updated', { trip: updatedTrip });
     return ok({ trip: updatedTrip });
   }
@@ -493,6 +496,7 @@ export class TripsMcp {
     description: 'Duplicate a trip (all days, places, itinerary, packing, budget, reservations, day notes). Packing items and to-dos are reset to unchecked. Returns the new trip.',
     inputSchema: {
       tripId: z.number().int().positive().describe('Source trip ID to duplicate'),
+      type: z.enum(['trip', 'outing']).optional(),
       title: z.string().min(1).max(200).optional().describe('Title for the new trip (defaults to source title)'),
     },
     annotations: TOOL_ANNOTATIONS_NON_IDEMPOTENT,

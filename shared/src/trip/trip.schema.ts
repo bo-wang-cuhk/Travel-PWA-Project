@@ -19,7 +19,11 @@ import { z } from 'zod';
  * table plus the computed list fields (day_count, place_count, is_owner as 0/1,
  * owner_username, shared_count). `is_archived` is the raw SQLite INTEGER.
  */
+export const tripTypeSchema = z.enum(['trip', 'outing']);
+export type TripType = z.infer<typeof tripTypeSchema>;
+
 export const tripSchema = z.object({
+  type: tripTypeSchema.optional(),
   id: z.number(),
   user_id: z.number(),
   title: z.string(),
@@ -72,6 +76,7 @@ export const tripRenameGuestRequestSchema = z.object({
 export type TripRenameGuestRequest = z.infer<typeof tripRenameGuestRequestSchema>;
 
 export const tripCreateRequestSchema = z.object({
+  type: tripTypeSchema.optional(),
   title: z.string().min(1),
   description: z.string().nullable().optional(),
   start_date: z.string().nullable().optional(),
@@ -84,6 +89,7 @@ export type TripCreateRequest = z.infer<typeof tripCreateRequestSchema>;
 
 /** Update is partial; the route runs per-field permission checks on what's present. */
 export const tripUpdateRequestSchema = z.object({
+  type: tripTypeSchema.optional(),
   title: z.string().optional(),
   description: z.string().nullable().optional(),
   start_date: z.string().nullable().optional(),
@@ -130,6 +136,7 @@ export type TripTransferOwnershipRequest = z.infer<typeof tripTransferOwnershipR
  * running today, else the next one starting, else the most recently started.
  */
 export const activeTripSchema = z.object({
+  type: tripTypeSchema.optional(),
   id: z.number(),
   title: z.string(),
   start_date: z.string().nullable().optional(),
@@ -143,3 +150,9 @@ export const activeTripResponseSchema = z.object({
   trip: activeTripSchema.nullable(),
 });
 export type ActiveTripResponse = z.infer<typeof activeTripResponseSchema>;
+
+/** Count modes independently while keeping one itinerary aggregate. */
+export function tripCounts(trips: readonly { type?: TripType }[]): { totalTrips: number; totalOutings: number } {
+  const totalOutings = trips.filter(trip => trip.type === 'outing').length;
+  return { totalTrips: trips.length - totalOutings, totalOutings };
+}

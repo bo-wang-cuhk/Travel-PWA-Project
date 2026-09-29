@@ -116,7 +116,7 @@ function AtlasPageDesktop(): React.ReactElement {
               <p className="text-3xl font-black tabular-nums leading-none text-content">{stats.totalCountries}</p>
               <p className="text-[9px] font-semibold uppercase tracking-wide mt-1 text-content-faint">{t('atlas.countries')}</p>
             </div>
-            {[[stats.totalTrips, t('atlas.trips')], [stats.totalPlaces, t('atlas.places')], [stats.totalCities || 0, t('atlas.cities')], [stats.totalDays, t('atlas.days')]].map(([v, l], i) => (
+            {[[stats.totalTrips, t('atlas.trips')], ...(stats.totalOutings ? [[stats.totalOutings, t('trip.mode.outing')]] : []), [stats.totalPlaces, t('atlas.places')], [stats.totalCities || 0, t('atlas.cities')], [stats.totalDays, t('atlas.days')]].map(([v, l], i) => (
               <div key={i} className="text-center px-1">
                 <p className="text-xl font-black tabular-nums leading-none text-content">{v}</p>
                 <p className="text-[9px] font-semibold uppercase tracking-wide mt-1 text-content-faint">{l}</p>
@@ -693,7 +693,7 @@ function SidebarContent({ data, stats, countries, selectedCountry, countryDetail
         )}
       </div>
       {/* Other stats */}
-      {[[stats.totalTrips, t('atlas.trips')], [stats.totalPlaces, t('atlas.places')], [stats.totalCities || 0, t('atlas.cities')], [stats.totalDays, t('atlas.days')]].map(([v, l], i) => (
+      {[[stats.totalTrips, t('atlas.trips')], ...(stats.totalOutings ? [[stats.totalOutings, t('trip.mode.outing')]] : []), [stats.totalPlaces, t('atlas.places')], [stats.totalCities || 0, t('atlas.cities')], [stats.totalDays, t('atlas.days')]].map(([v, l], i) => (
         <div key={i} className="flex flex-col items-center justify-center px-3 py-5 shrink-0">
           <span className="text-2xl font-black tabular-nums leading-none" style={{ color: tp }}>{v}</span>
           <span className="text-[9px] font-semibold mt-1.5 uppercase tracking-wide whitespace-nowrap" style={{ color: tf }}>{l}</span>

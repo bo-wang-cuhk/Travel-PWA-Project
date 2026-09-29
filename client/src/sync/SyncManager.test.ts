@@ -89,6 +89,25 @@ class LastWriteWinsProvider extends MemoryProvider {
 beforeEach(async () => { await clearAll() })
 
 describe('local-first SyncManager', () => {
+  it('restores an outing, its sole day and shared visit status on a fresh device', async () => {
+    const provider = new LastWriteWinsProvider()
+    const { trip } = await tripRepo.create({ title: 'Museum outing', type: 'outing' })
+    const [day] = (await dayRepo.list(trip.id)).days
+    const { place } = await placeRepo.create(trip.id, { name: 'Museum', visit_status: 'visited' })
+    await assignmentRepo.create(trip.id, day.id, place.id)
+    await new SyncManager(provider).sync()
+    await clearAll()
+    await new SyncManager(provider).sync()
+    const restored = (await tripRepo.list()).trips[0]
+    expect(restored).toMatchObject({ type: 'outing', day_count: 1, start_date: null, end_date: null })
+    const restoredDays = (await dayRepo.list(restored.id)).days
+    expect(restoredDays).toHaveLength(1)
+    const restoredPlaces = (await placeRepo.list(restored.id)).places
+    expect(restoredPlaces).toMatchObject([{ name: 'Museum', visit_status: 'visited' }])
+    const assignments = await offlineDb.assignments.where('day_id').equals(restoredDays[0].id).toArray()
+    expect(assignments.filter(a => !a.deleted_at)).toMatchObject([{ place_id: restoredPlaces[0].id }])
+  })
+
   it('restores a journey and its text entries on another device with stable trip links', async () => {
     const provider = new LastWriteWinsProvider()
     const trip = (await tripRepo.create({ title: 'Seoul', day_count: 1 })).trip

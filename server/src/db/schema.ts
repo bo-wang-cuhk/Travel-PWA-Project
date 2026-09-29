@@ -79,6 +79,7 @@ function createTables(db: Database.Database): void {
     );
 
     CREATE TABLE IF NOT EXISTS trips (
+      type TEXT NOT NULL DEFAULT 'trip' CHECK (type IN ('trip', 'outing')),
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       title TEXT NOT NULL,
@@ -122,6 +123,7 @@ function createTables(db: Database.Database): void {
     );
 
     CREATE TABLE IF NOT EXISTS places (
+      visit_status TEXT NOT NULL DEFAULT 'planned' CHECK (visit_status IN ('planned', 'visited', 'skipped')),
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
       name TEXT NOT NULL,

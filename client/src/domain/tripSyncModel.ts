@@ -1,3 +1,4 @@
+import { tripTypeSchema } from '@trek/shared'
 import type { Trip } from '../types'
 
 /**
@@ -17,6 +18,7 @@ export type StoredTripRecord = Trip & Partial<Pick<LocalTripRecord, 'sync_id' | 
 /** Provider-neutral representation written to a personal sync provider. */
 export interface SyncedTrip {
   schemaVersion: 1
+  type?: Trip['type']
   id: string
   title: string
   description: string | null
@@ -35,6 +37,7 @@ export interface SyncedTrip {
 export function toSyncedTrip(trip: LocalTripRecord): SyncedTrip {
   return {
     schemaVersion: 1,
+    type: trip.type ?? 'trip',
     id: trip.sync_id,
     title: trip.title,
     description: trip.description ?? null,
@@ -56,19 +59,21 @@ export function applySyncedTrip(
   localId: number,
   userId = 0,
 ): LocalTripRecord {
+  const type = tripTypeSchema.parse(remote.type ?? 'trip')
   return {
     id: localId,
+    type,
     sync_id: remote.id,
     user_id: userId,
     title: remote.title,
     description: remote.description,
-    start_date: remote.startDate,
-    end_date: remote.endDate,
+    start_date: type === 'outing' ? remote.startDate ?? remote.endDate : remote.startDate,
+    end_date: type === 'outing' ? remote.startDate ?? remote.endDate : remote.endDate,
     currency: remote.currency,
     cover_image: remote.coverImage,
     is_archived: Number(remote.archived),
     reminder_days: remote.reminderDays,
-    day_count: remote.dayCount,
+    day_count: type === 'outing' ? 1 : remote.dayCount,
     place_count: 0,
     is_owner: 1,
     shared_count: 0,

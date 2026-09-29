@@ -62,6 +62,7 @@ type ImportedPlace = { id: number; route_geometry?: string | null; route_color?:
 
 /** Fields accepted when creating a place. */
 export interface PlaceCreateInput {
+  visit_status?: 'planned' | 'visited' | 'skipped';
   name: string; description?: string; lat?: number; lng?: number; address?: string;
   category_id?: number; price?: number; currency?: string;
   place_time?: string; end_time?: string;
@@ -72,6 +73,7 @@ export interface PlaceCreateInput {
 
 /** Fields accepted when patching a place. */
 export interface PlaceUpdateInput {
+  visit_status?: 'planned' | 'visited' | 'skipped';
   name?: string; description?: string; lat?: number; lng?: number; address?: string;
   category_id?: number; price?: number; currency?: string;
   place_time?: string; end_time?: string;
@@ -221,7 +223,7 @@ export class PlacesService {
 
   create(tripId: string, body: PlaceCreateInput) {
     const {
-      name, description, lat, lng, address, category_id, price, currency,
+      name, description, lat, lng, address, category_id, price, currency, visit_status,
       place_time, end_time,
       duration_minutes, notes, image_url, google_place_id, google_ftid, osm_id, website, phone,
       transport_mode, route_geometry, route_color, tags = [],
@@ -231,8 +233,8 @@ export class PlacesService {
     INSERT INTO places (trip_id, name, description, lat, lng, address, category_id, price, currency,
       place_time, end_time,
       duration_minutes, notes, image_url, google_place_id, google_ftid, osm_id, website, phone, transport_mode,
-      route_geometry, route_color)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      route_geometry, route_color, visit_status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
       // lat/lng/price/duration_minutes use an explicit undefined check, not `||`:
       // 0 is a legitimate value for all four (Null Island, a free entry, a
@@ -241,7 +243,7 @@ export class PlacesService {
       category_id || null, price ?? null, currency || null,
       place_time || null, end_time || null, duration_minutes ?? 60, notes || null, image_url || null,
       google_place_id || null, google_ftid || null, osm_id || null, website || null, phone || null, transport_mode || 'walking',
-      route_geometry || null, route_color || null,
+      route_geometry || null, route_color || null, visit_status ?? 'planned',
     );
 
     const placeId = result.lastInsertRowid;
@@ -303,7 +305,7 @@ export class PlacesService {
     }
 
     const {
-      name, description, lat, lng, address, category_id, price, currency,
+      name, description, lat, lng, address, category_id, price, currency, visit_status,
       place_time, end_time,
       duration_minutes, notes, image_url, google_place_id, google_ftid, osm_id, website, phone,
       transport_mode, route_color, tags,
@@ -311,6 +313,7 @@ export class PlacesService {
 
     this.dbs.run(`
     UPDATE places SET
+      visit_status = COALESCE(?, visit_status),
       name = COALESCE(?, name),
       description = ?,
       lat = ?,
@@ -334,6 +337,7 @@ export class PlacesService {
       updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `,
+      visit_status ?? null,
       name || null,
       description !== undefined ? description : existingPlace.description,
       lat !== undefined ? lat : existingPlace.lat,

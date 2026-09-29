@@ -47,6 +47,7 @@ export const TRIP_SELECT = `
 `;
 
 interface CreateTripData {
+  type?: 'trip' | 'outing';
   title: string;
   description?: string | null;
   start_date?: string | null;
@@ -59,6 +60,7 @@ interface CreateTripData {
 // Nullable where the wire contract (tripUpdateRequestSchema) is nullable — the
 // legacy route accepted arbitrary JSON, so null always reached these fields.
 interface UpdateTripData {
+  type?: 'trip' | 'outing';
   title?: string;
   description?: string | null;
   start_date?: string | null;
@@ -310,20 +312,26 @@ export class TripsService {
   }
 
   create(userId: number, data: CreateTripData, maxDays?: number) {
+    if (data.type === 'outing') {
+      const date = data.start_date ?? data.end_date ?? null;
+      data = { ...data, start_date: date, end_date: date, day_count: 1 };
+    }
+    return this.db.transaction(() => {
     const rd = data.reminder_days !== undefined
       ? (Number(data.reminder_days) >= 0 && Number(data.reminder_days) <= 30 ? Number(data.reminder_days) : 3)
       : 3;
 
     const result = this.db.prepare(`
-      INSERT INTO trips (user_id, title, description, start_date, end_date, currency, reminder_days)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(userId, data.title, data.description || null, data.start_date || null, data.end_date || null, data.currency || 'EUR', rd);
+      INSERT INTO trips (user_id, title, description, start_date, end_date, currency, reminder_days, type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(userId, data.title, data.description || null, data.start_date || null, data.end_date || null, data.currency || 'EUR', rd, data.type ?? 'trip');
 
     const tripId = result.lastInsertRowid;
     this.generateDays(tripId, data.start_date || null, data.end_date || null, maxDays, data.day_count);
 
     const trip = this.db.prepare(`${TRIP_SELECT} WHERE t.id = :tripId`).get({ userId, tripId });
     return { trip, tripId: Number(tripId), reminderDays: rd };
+    })();
   }
 
   get(tripId: string | number, userId: number) {
@@ -347,7 +355,7 @@ export class TripsService {
    */
   activeTrip(userId: number, today = new Date().toISOString().slice(0, 10)) {
     return this.db.prepare(`
-      SELECT t.id, t.title, t.start_date, t.end_date,
+      SELECT t.id, t.title, t.start_date, t.end_date, t.type,
         CASE
           WHEN t.start_date IS NOT NULL AND t.end_date IS NOT NULL AND t.start_date <= :today AND t.end_date >= :today THEN 0
           WHEN t.start_date IS NOT NULL AND t.start_date >= :today THEN 1
@@ -384,6 +392,13 @@ export class TripsService {
     const trip = this.db.prepare('SELECT * FROM trips WHERE id = ?').get(tripId) as Trip & { reminder_days?: number } | undefined;
     if (!trip) throw new NotFoundError('Trip not found');
 
+    const nextType = data.type ?? trip.type ?? 'trip';
+    if (nextType === 'outing') {
+      const count = (this.db.prepare('SELECT COUNT(*) as count FROM days WHERE trip_id = ?').get(tripId) as { count: number }).count;
+      if (trip.type !== 'outing' && count !== 1) throw new ValidationError('Only trips with one day can become outings');
+      const date = data.start_date !== undefined ? data.start_date : data.end_date !== undefined ? data.end_date : trip.start_date ?? trip.end_date ?? null;
+      data = { ...data, start_date: date, end_date: date, day_count: 1 };
+    }
     const { title, description, start_date, end_date, currency, is_archived, cover_image, reminder_days } = data;
 
     if (start_date && end_date && new Date(end_date) < new Date(start_date))
@@ -401,11 +416,12 @@ export class TripsService {
       ? (Number(reminder_days) >= 0 && Number(reminder_days) <= 30 ? Number(reminder_days) : oldReminder)
       : oldReminder;
 
+    this.db.transaction(() => {
     this.db.prepare(`
       UPDATE trips SET title=?, description=?, start_date=?, end_date=?,
-        currency=?, is_archived=?, cover_image=?, reminder_days=?, updated_at=CURRENT_TIMESTAMP
+        currency=?, is_archived=?, cover_image=?, reminder_days=?, type=?, updated_at=CURRENT_TIMESTAMP
       WHERE id=?
-    `).run(newTitle, newDesc, newStart || null, newEnd || null, newCurrency, newArchived, newCover, newReminder, tripId);
+    `).run(newTitle, newDesc, newStart || null, newEnd || null, newCurrency, newArchived, newCover, newReminder, nextType, tripId);
 
     if (trip.start_date && trip.end_date && newStart && newStart !== trip.start_date)
       this.vacay.shiftOwnerEntriesForTripWindow(trip.user_id, trip.start_date, trip.end_date, newStart);
@@ -438,7 +454,9 @@ export class TripsService {
       })();
     }
 
+    })();
     const changes: Record<string, unknown> = {};
+    if (nextType !== (trip.type ?? 'trip')) changes.type = nextType;
     if (title && title !== trip.title) changes.title = title;
     if (newStart !== trip.start_date) changes.start_date = newStart;
     if (newEnd !== trip.end_date) changes.end_date = newEnd;
@@ -533,9 +551,9 @@ export class TripsService {
 
     const fn = this.db.transaction(() => {
       const tripResult = this.db.prepare(`
-        INSERT INTO trips (user_id, title, description, start_date, end_date, currency, cover_image, is_archived, reminder_days)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
-      `).run(newOwnerId, newTitle, src.description, src.start_date, src.end_date, src.currency, src.cover_image, src.reminder_days ?? 3);
+        INSERT INTO trips (user_id, title, description, start_date, end_date, currency, cover_image, is_archived, reminder_days, type)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+      `).run(newOwnerId, newTitle, src.description, src.start_date, src.end_date, src.currency, src.cover_image, src.reminder_days ?? 3, src.type ?? 'trip');
       const newTripId = tripResult.lastInsertRowid;
 
       const oldDays = this.db.prepare('SELECT * FROM days WHERE trip_id = ? ORDER BY day_number').all(sourceTripId) as any[];
@@ -552,14 +570,14 @@ export class TripsService {
         INSERT INTO places (trip_id, name, description, lat, lng, address, category_id, price, currency,
           reservation_status, reservation_notes, reservation_datetime, place_time, end_time,
           duration_minutes, notes, image_url, google_place_id, google_ftid, website, phone, transport_mode, osm_id,
-          route_geometry, route_color)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          route_geometry, route_color, visit_status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       for (const p of oldPlaces) {
         const r = insertPlace.run(newTripId, p.name, p.description, p.lat, p.lng, p.address, p.category_id,
           p.price, p.currency, p.reservation_status, p.reservation_notes, p.reservation_datetime,
           p.place_time, p.end_time, p.duration_minutes, p.notes, p.image_url, p.google_place_id,
-          p.google_ftid, p.website, p.phone, p.transport_mode, p.osm_id, p.route_geometry, p.route_color);
+          p.google_ftid, p.website, p.phone, p.transport_mode, p.osm_id, p.route_geometry, p.route_color, p.visit_status ?? 'planned');
         placeMap.set(p.id, r.lastInsertRowid);
       }
 

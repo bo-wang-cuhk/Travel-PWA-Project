@@ -1,3 +1,4 @@
+import TripModeFilter from '../components/Trips/TripModeFilter'
 import React, { useEffect, useState } from 'react'
 import { useTranslation } from '../i18n'
 import Navbar from '../components/Layout/Navbar'
@@ -117,7 +118,7 @@ function DashboardPageDesktop(): React.ReactElement {
     demoMode, locale, t, navigate,
     spotlight, heroBundle, stats, upcoming, gridTrips, isLoading,
     loadError, retryLoad,
-    tripFilter, setTripFilter, viewMode, toggleViewMode,
+    tripMode, setTripMode, tripFilter, setTripFilter, viewMode, toggleViewMode,
     showForm, setShowForm, editingTrip, setEditingTrip,
     deleteTrip, setDeleteTrip, copyTrip, setCopyTrip, applyCoverUpdate,
     handleCreate, handleUpdate, confirmDelete, handleArchive, handleUnarchive, confirmCopy,
@@ -188,6 +189,7 @@ function DashboardPageDesktop(): React.ReactElement {
             <AtlasStats stats={stats} />
 
             <section>
+              <TripModeFilter value={tripMode} onChange={setTripMode} />
               <div className="sec-head">
                 <h3 className="sec-title">{t('dashboard.title')}</h3>
                 <div className="sec-tools">
@@ -382,9 +384,9 @@ function BoardingPassHero({ trip, bundle, locale, onOpen, onEdit, onCopy, onArch
         <div className="dates-row">
           {start ? <div className="date-block"><div className="date-num mono">{start.d}</div><div className="date-month">{start.m}{start.y ? ` ${start.y}` : ''}</div></div>
             : <div className="date-block"><div className="date-num">—</div></div>}
-          <div className="date-arrow"><ArrowRight /></div>
-          {end ? <div className="date-block"><div className="date-num mono">{end.d}</div><div className="date-month">{end.m}{end.y ? ` ${end.y}` : ''}</div></div>
-            : <div className="date-block"><div className="date-num">—</div></div>}
+          {trip.type !== 'outing' && <div className="date-arrow"><ArrowRight /></div>}
+          {trip.type !== 'outing' && (end ? <div className="date-block"><div className="date-num mono">{end.d}</div><div className="date-month">{end.m}{end.y ? ` ${end.y}` : ''}</div></div>
+            : <div className="date-block"><div className="date-num">—</div></div>)}
         </div>
       </div>
 
@@ -535,7 +537,7 @@ function AtlasStats({ stats }: { stats: TravelStats | null }): React.ReactElemen
         <div className="atlas-card">
           <div className="label">{t('dashboard.atlas.tripsTotal')}</div>
           <div className="value mono">{statsPending ? <Skeleton width={44} height={30} radius={6} /> : stats.totalTrips ?? 0}</div>
-          <div className="delta">{statsPending ? <Skeleton width={90} height={12} /> : t('dashboard.atlas.placesMapped', { count: stats.totalPlaces ?? 0 })}</div>
+          <div className="delta">{statsPending ? <Skeleton width={90} height={12} /> : <>{t('dashboard.atlas.placesMapped', { count: stats.totalPlaces ?? 0 })}{Boolean(stats.totalOutings) && ` · ${stats.totalOutings} ${t('trip.mode.outing')}`}</>}</div>
           <svg className="spark" width="80" height="36" viewBox="0 0 80 36">
             <polyline points="0,30 12,26 22,28 32,18 44,22 56,10 68,14 80,4" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
@@ -623,7 +625,7 @@ function TripCard({ trip, locale, badges, onOpen, onEdit, onCopy, onArchive, onD
       </div>
       <div className="trip-body">
         <div className="trip-dates">
-          {start && end ? (
+          {trip.type === 'outing' && start ? <span className="date-num">{fullDate(trip.start_date, locale)}</span> : start && end ? (
             <>
               <span className="date-num">{fullDate(trip.start_date, locale)}</span>
               <span className="date-arrow"><ArrowRight size={11} /></span>
@@ -632,7 +634,7 @@ function TripCard({ trip, locale, badges, onOpen, onEdit, onCopy, onArchive, onD
           ) : <span>{t('dashboard.hero.noDates')}</span>}
         </div>
         <div className="trip-meta" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
-          <div><span className="n mono">{trip.day_count ?? 0}</span><span className="k">{t('dashboard.days')}</span></div>
+          <div><span className="n mono">{trip.day_count ?? 0}</span><span className="k">{t(trip.type === 'outing' ? 'trip.mode.outing' : 'dashboard.days')}</span></div>
           <div><span className="n mono">{trip.place_count ?? 0}</span><span className="k">{t('dashboard.places')}</span></div>
           <div><span className="n mono">{trip.shared_count ?? 0}</span><span className="k">{trip.shared_count === 1 ? t('dashboard.card.buddyOne') : t('dashboard.members')}</span></div>
         </div>

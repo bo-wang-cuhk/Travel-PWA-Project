@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { CONTINENT_MAP, strongerVisitStatus, todayUtc, tripVisitStatus, VisitStatus } from '@trek/shared';
+import { tripCounts, CONTINENT_MAP, strongerVisitStatus, todayUtc, VisitStatus } from '@trek/shared';
 import type { AtlasLocateResponse } from '@trek/shared';
 import { Trip, Place } from '../../types';
 import { DatabaseService } from '../database/database.service';
@@ -14,18 +14,7 @@ import {
 } from './atlas-geo';
 import { KNOWN_COUNTRIES } from './known-countries';
 import { cityFromAddress } from './city-from-address';
-import { transferEndpointIds } from './transfer-endpoints';
-import type { FlightEndpointRow } from './transfer-endpoints';
 import { haversineKm } from '../common/geo';
-
-/**
- * A reservation endpoint plus the two booking columns that decide whether it may
- * take part in layover pairing at all (see transfer-endpoints.ts).
- */
-type EndpointRow = FlightEndpointRow & {
-  reservation_type: string | null;
-  reservation_status: string | null;
-};
 
 export type CreateBucketData = {
   name: string;
@@ -115,23 +104,22 @@ export class AtlasService {
   private getPlacesForTrips(tripIds: number[]): Place[] {
     if (tripIds.length === 0) return [];
     const placeholders = tripIds.map(() => '?').join(',');
-    return this.db.prepare(`SELECT * FROM places WHERE trip_id IN (${placeholders})`).all(...tripIds) as Place[];
+    return this.db.prepare(`SELECT * FROM places WHERE visit_status = 'visited' AND trip_id IN (${placeholders})`).all(...tripIds) as Place[];
   }
 
   /**
-   * Trip id → whether that trip counts as visited, planned or a dateless idea (#1048).
-   * Everything country-shaped downstream takes its status from here, so the map, the
-   * counters and the country detail sheet can never disagree about the same trip.
+   * Source places are already filtered to explicit visits. Their countries and
+   * regions remain visited regardless of the parent trip's dates or mode.
    */
-  private tripStatusMap(trips: Trip[], today: string): Map<number, VisitStatus> {
-    return new Map(trips.map((t) => [t.id, tripVisitStatus(t.start_date, t.end_date, today)]));
+  private tripStatusMap(trips: Trip[]): Map<number, VisitStatus> {
+    return new Map(trips.map((t) => [t.id, 'visited' as VisitStatus]));
   }
 
   // ── Country resolution (batch DB cache + sync fallback + background geocoding) ──
 
   private resolvePlaceCountries(places: Place[]): Map<number, string> {
     const out = new Map<number, string>();
-    const geoPlaces = places.filter((p) => p.lat && p.lng);
+    const geoPlaces = places.filter((p) => p.lat != null && p.lng != null);
     const placeIds = geoPlaces.map((p) => p.id);
 
     const cached =
@@ -156,7 +144,7 @@ export class AtlasService {
         out.set(p.id, sync);
         continue;
       }
-      if (p.lat && p.lng && !geocodingInFlight.has(p.id)) {
+      if (p.lat != null && p.lng != null && !geocodingInFlight.has(p.id)) {
         uncachedForGeocode.push(p);
       }
     }
@@ -212,7 +200,7 @@ export class AtlasService {
 
     const places = this.getPlacesForTrips(tripIds);
     const now = todayUtc();
-    const tripStatus = this.tripStatusMap(trips, now);
+    const tripStatus = this.tripStatusMap(trips);
 
     interface CountryEntry {
       code: string;
@@ -320,59 +308,9 @@ export class AtlasService {
       }
     }
 
-    // Merge countries reached only by a transport booking. Those store geocoded from/to
-    // coordinates in reservation_endpoints but create no place row, so they never show up
-    // via resolvePlaceCountries above and would otherwise be missed (#1366).
-    // Only 'from'/'to' legs count as actually reached — a 'stop' is an intermediate
-    // connection/layover (e.g. a plane change) the traveler never really visited.
-    const endpointRows = this.db
-      .prepare(
-        `
-    SELECT DISTINCT e.id, e.reservation_id, r.trip_id, e.role, e.code, e.lat, e.lng, e.local_date, e.local_time,
-           r.type AS reservation_type, r.status AS reservation_status,
-           CASE e.role
-             WHEN 'to' THEN COALESCE(r.reservation_end_time, r.reservation_time)
-             ELSE COALESCE(r.reservation_time, r.reservation_end_time)
-           END AS fallback_time
-    FROM reservation_endpoints e
-    JOIN reservations r ON e.reservation_id = r.id
-    WHERE r.trip_id IN (${tripIds.map(() => '?').join(',')}) AND e.role IN ('from', 'to')
-      AND ${AtlasService.TRAVELER_OWNS}
-  `,
-      )
-      .all(...tripIds, userId) as EndpointRow[];
+    // Only explicitly visited places and manual marks contribute footprints.
 
-    // A layover the traveler never left is only marked 'stop' while both its legs sit in
-    // one booking. Split over two bookings it is a plain 'to' plus 'from' at the same
-    // airport, so it has to be recognised from the times instead (#1535). Only flights
-    // pair: a rental car picked up where a flight landed has its own from/to there and
-    // must keep contributing its country (#1366).
-    const transfers = transferEndpointIds(
-      endpointRows.filter((e) => e.reservation_type === 'flight' && e.reservation_status !== 'cancelled'),
-    );
-    const endpoints = endpointRows.filter((e) => !transfers.has(e.id));
-
-    // Collapse to one entry per coordinate before resolving countries —
-    // getCountryFromCoords is a point-in-polygon scan and used to run once per point.
-    const endpointStatus = new Map<string, { lat: number; lng: number; status: VisitStatus }>();
-    for (const e of endpoints) {
-      const status = tripStatus.get(e.trip_id) ?? 'idea';
-      const key = `${e.lat},${e.lng}`;
-      const seen = endpointStatus.get(key);
-      if (seen) seen.status = strongerVisitStatus(seen.status, status);
-      else endpointStatus.set(key, { lat: e.lat, lng: e.lng, status });
-    }
-    for (const e of endpointStatus.values()) {
-      const code = getCountryFromCoords(e.lat, e.lng);
-      if (!code || hidden.has(code)) continue;
-      const existing = countries.find((c) => c.code === code);
-      if (existing) existing.status = strongerVisitStatus(existing.status, e.status);
-      else
-        countries.push({ code, placeCount: 0, tripCount: 0, firstVisit: null, lastVisit: null, status: e.status });
-    }
-
-    // Everything below counts actual visits only. countries[] still carries planned and
-    // dateless entries so the client can draw them once the user asks for them (#1048).
+    // Count explicit visits and manual marks only.
     const visited = countries.filter((c) => c.status === 'visited');
     const planned = countries.filter((c) => c.status === 'planned');
 
@@ -442,7 +380,7 @@ export class AtlasService {
     return {
       countries,
       stats: {
-        totalTrips: trips.length,
+        ...tripCounts(trips),
         totalPlaces: places.length,
         totalCountries: visited.length,
         totalCountriesPlanned: planned.length,
@@ -512,7 +450,7 @@ export class AtlasService {
 
     // Take the status from the same trip classification stats() uses rather than deriving
     // it again here — the detail sheet and the map must agree on what this country is.
-    const tripStatus = this.tripStatusMap(trips, todayUtc());
+    const tripStatus = this.tripStatusMap(trips);
     let status: VisitStatus = 'idea';
     for (const id of matchingTripIds) status = strongerVisitStatus(status, tripStatus.get(id) ?? 'idea');
     if (isManuallyMarked) status = 'visited';
@@ -598,7 +536,7 @@ export class AtlasService {
   private hasVisibleRegionForCountry(userId: number, countryCode: string, hidden: Set<string>): boolean {
     const tripIds = this.getUserTrips(userId).map((t) => t.id);
     const placeIds = this.getPlacesForTrips(tripIds)
-      .filter((p) => p.lat && p.lng)
+      .filter((p) => p.lat != null && p.lng != null)
       .map((p) => p.id);
     const placeRegionCodes =
       placeIds.length > 0
@@ -661,11 +599,11 @@ export class AtlasService {
 
     // Regions carry the same status as their country, otherwise zooming into a merely
     // planned country would reveal regions painted as visited (#1048).
-    const tripStatus = this.tripStatusMap(trips, todayUtc());
+    const tripStatus = this.tripStatusMap(trips);
     const placeTrip = new Map(places.map((p) => [p.id, p.trip_id]));
 
     // Check DB cache first
-    const placeIds = places.filter((p) => p.lat && p.lng).map((p) => p.id);
+    const placeIds = places.filter((p) => p.lat != null && p.lng != null).map((p) => p.id);
     const cached =
       placeIds.length > 0
         ? (this.db
@@ -675,7 +613,7 @@ export class AtlasService {
     const cachedMap = new Map(cached.map((c) => [c.place_id, c]));
 
     // Kick off background geocoding for uncached places; return cached data immediately.
-    const uncached = places.filter((p) => p.lat && p.lng && !cachedMap.has(p.id) && !geocodingInFlight.has(p.id));
+    const uncached = places.filter((p) => p.lat != null && p.lng != null && !cachedMap.has(p.id) && !geocodingInFlight.has(p.id));
     if (uncached.length > 0) {
       const insertStmt = this.db.prepare(
         'INSERT OR REPLACE INTO place_regions (place_id, country_code, region_code, region_name) VALUES (?, ?, ?, ?)',
@@ -961,7 +899,7 @@ export class AtlasService {
     SELECT pr.country_code, COUNT(DISTINCT p.id) AS places
     FROM place_regions pr
     JOIN places p ON p.id = pr.place_id
-    WHERE p.trip_id = ? AND pr.country_code IS NOT NULL
+    WHERE p.trip_id = ? AND p.visit_status = 'visited' AND pr.country_code IS NOT NULL
     GROUP BY pr.country_code
     ORDER BY places DESC, pr.country_code ASC
   `, trip.id);
@@ -983,14 +921,15 @@ export class AtlasService {
     JOIN trips t ON p.trip_id = t.id
     LEFT JOIN trip_members tm ON t.id = tm.trip_id
     LEFT JOIN place_regions pr ON pr.place_id = p.id
-    WHERE t.user_id = ? OR tm.user_id = ?
+    WHERE (t.user_id = ? OR tm.user_id = ?) AND p.visit_status = 'visited'
   `, userId, userId);
 
     // Archived trips still count here, matching the places, countries and flight
     // distance widgets (which never filtered on is_archived) so the dashboard stats
     // stay consistent — archiving a trip no longer zeroes out trips/days.
-    const tripStats = this.db.get<{ trips: number; days: number }>(`
-    SELECT COUNT(DISTINCT t.id) as trips,
+    const tripStats = this.db.get<{ trips: number; outings: number; days: number }>(`
+    SELECT COUNT(DISTINCT CASE WHEN t.type = 'trip' THEN t.id END) as trips,
+           COUNT(DISTINCT CASE WHEN t.type = 'outing' THEN t.id END) as outings,
            COUNT(DISTINCT d.id) as days
     FROM trips t
     LEFT JOIN days d ON d.trip_id = t.id
@@ -1018,9 +957,7 @@ export class AtlasService {
     );
     manualCountries.forEach(m => { if (m.country_code) countryCodes.add(m.country_code.toUpperCase()); });
 
-    // Only trips that have already started count as visited — a country you have merely
-    // booked a trip to isn't stamped in the passport yet, and one you jotted down without
-    // any dates even less so (#1048). date('now') is UTC, matching tripVisitStatus.
+    // Country footprints require an explicit shared place visit status.
     const placeRegionCodes = this.db.all<{ country_code: string }>(`
     SELECT DISTINCT pr.country_code
     FROM place_regions pr
@@ -1028,50 +965,9 @@ export class AtlasService {
     JOIN trips t ON p.trip_id = t.id
     LEFT JOIN trip_members tm ON t.id = tm.trip_id
     WHERE (t.user_id = ? OR tm.user_id = ?) AND pr.country_code IS NOT NULL
-      AND COALESCE(t.start_date, t.end_date) IS NOT NULL
-      AND COALESCE(t.start_date, t.end_date) <= date('now')
+      AND p.visit_status = 'visited'
   `, userId, userId);
     placeRegionCodes.forEach(r => { if (r.country_code) countryCodes.add(r.country_code.toUpperCase()); });
-
-    // Transport bookings don't create a place row, so their geocoded endpoints never
-    // reached place_regions — a country reached only by a flight/train (no lodging or
-    // planned place there) was never counted as visited (#1366). Resolve each endpoint
-    // coordinate to a country and fold it in too.
-    // Only 'from'/'to' legs count as actually reached — a 'stop' is an intermediate
-    // connection/layover (e.g. a plane change) the traveler never really visited (#1486),
-    // and the same layover split over two bookings is recognised from its ground time
-    // instead, because there it is stored as a legitimate 'to'/'from' pair (#1535).
-    const endpointRows = this.db.all<EndpointRow>(`
-    SELECT DISTINCT e.id, e.reservation_id, r.trip_id, e.role, e.code, e.lat, e.lng, e.local_date, e.local_time,
-           r.type AS reservation_type, r.status AS reservation_status,
-           CASE e.role
-             WHEN 'to' THEN COALESCE(r.reservation_end_time, r.reservation_time)
-             ELSE COALESCE(r.reservation_time, r.reservation_end_time)
-           END AS fallback_time
-    FROM reservation_endpoints e
-    JOIN reservations r ON e.reservation_id = r.id
-    JOIN trips t ON r.trip_id = t.id
-    LEFT JOIN trip_members tm ON t.id = tm.trip_id
-    WHERE (t.user_id = ? OR tm.user_id = ?) AND e.role IN ('from', 'to')
-      AND COALESCE(t.start_date, t.end_date) IS NOT NULL
-      AND COALESCE(t.start_date, t.end_date) <= date('now')
-      AND ${AtlasService.TRAVELER_OWNS}
-  `, userId, userId, userId);
-    const transfers = transferEndpointIds(
-      endpointRows.filter(e => e.reservation_type === 'flight' && e.reservation_status !== 'cancelled')
-    );
-    // The DISTINCT no longer collapses per coordinate now that the endpoint id has to be
-    // in the projection, so collapse here instead: getCountryFromCoords is a
-    // point-in-polygon scan and must stay at one run per coordinate.
-    const endpointCoords = new Map<string, { lat: number; lng: number }>();
-    for (const e of endpointRows) {
-      if (transfers.has(e.id)) continue;
-      endpointCoords.set(`${e.lat},${e.lng}`, { lat: e.lat, lng: e.lng });
-    }
-    for (const e of endpointCoords.values()) {
-      const code = getCountryFromCoords(e.lat, e.lng);
-      if (code) countryCodes.add(code.toUpperCase());
-    }
 
     // Countries the user removed in Atlas stay removed on the dashboard too, so the
     // passport card and the Atlas map agree (#1490).
@@ -1082,6 +978,7 @@ export class AtlasService {
       cities: [...cities],
       coords,
       totalTrips: tripStats?.trips || 0,
+      totalOutings: tripStats?.outings || 0,
       totalDays: tripStats?.days || 0,
       totalPlaces: places.length,
       totalDistanceKm: this.flightDistanceKm(userId),

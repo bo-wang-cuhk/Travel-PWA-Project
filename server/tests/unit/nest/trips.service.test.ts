@@ -1144,3 +1144,54 @@ describe('activeTrip (startup destination)', () => {
     expect(svc.activeTrip(guest.id, TODAY)?.title).toBe('shared');
   });
 });
+
+describe('single-day outing mode', () => {
+  it('creates one undated day and retains its mode when copied', () => {
+    const { user } = createUser(testDb);
+    const { tripId } = svc.create(user.id, { title: 'Museum', type: 'outing', day_count: 7 });
+    expect(testDb.prepare('SELECT type, start_date, end_date FROM trips WHERE id = ?').get(tripId))
+      .toEqual({ type: 'outing', start_date: null, end_date: null });
+    expect(testDb.prepare('SELECT date FROM days WHERE trip_id = ?').all(tripId)).toEqual([{ date: null }]);
+    const copied = svc.copy(tripId, user.id);
+    expect(testDb.prepare('SELECT type FROM trips WHERE id = ?').get(copied)).toEqual({ type: 'outing' });
+    expect(testDb.prepare('SELECT id FROM days WHERE trip_id = ?').all(copied)).toHaveLength(1);
+  });
+
+  it('protects its only day and preserves its identity and notes on date changes', () => {
+    const { user } = createUser(testDb);
+    const { tripId } = svc.create(user.id, { title: 'Park', type: 'outing', start_date: '2026-09-27' });
+    const day = testDb.prepare('SELECT id FROM days WHERE trip_id = ?').get(tripId) as { id: number };
+    testDb.prepare('UPDATE days SET notes = ? WHERE id = ?').run('Bring water', day.id);
+    expect(() => daysSvc.insert(tripId)).toThrow('exactly one day');
+    expect(() => daysSvc.create(tripId)).toThrow('exactly one day');
+    expect(() => daysSvc.remove(day.id)).toThrow('exactly one day');
+    svc.updateTrip(tripId, user.id, { start_date: '2026-10-01' }, 'user');
+    expect(testDb.prepare('SELECT id, date, notes FROM days WHERE trip_id = ?').all(tripId))
+      .toEqual([{ id: day.id, date: '2026-10-01', notes: 'Bring water' }]);
+    expect(testDb.prepare('SELECT start_date, end_date FROM trips WHERE id = ?').get(tripId))
+      .toEqual({ start_date: '2026-10-01', end_date: '2026-10-01' });
+  });
+
+  it('allows upgrades and rejects a multi-day conversion without saving any fields', () => {
+    const { user } = createUser(testDb);
+    const { tripId } = svc.create(user.id, { title: 'Weekend', type: 'outing', start_date: '2026-10-01' });
+    svc.updateTrip(tripId, user.id, { type: 'trip', end_date: '2026-10-03' }, 'user');
+    expect(testDb.prepare('SELECT id FROM days WHERE trip_id = ?').all(tripId)).toHaveLength(3);
+    expect(() => svc.updateTrip(tripId, user.id, { type: 'outing', title: 'Lost' }, 'user')).toThrow('one day');
+    expect(testDb.prepare('SELECT type, title FROM trips WHERE id = ?').get(tripId))
+      .toEqual({ type: 'trip', title: 'Weekend' });
+  });
+
+  it('persists shared visit status and copies it with the place', async () => {
+    const { user } = createUser(testDb);
+    const { tripId } = svc.create(user.id, { title: 'Zoo', type: 'outing' });
+    placesSvc.create(String(tripId), { name: 'Zoo' });
+    const place = testDb.prepare('SELECT id, visit_status FROM places WHERE trip_id = ?').get(tripId) as { id: number; visit_status: string };
+    expect(place.visit_status).toBe('planned');
+    await placesSvc.update(String(tripId), String(place.id), { visit_status: 'visited' });
+    expect(testDb.prepare('SELECT visit_status FROM places WHERE id = ?').get(place.id)).toEqual({ visit_status: 'visited' });
+    const copied = svc.copy(tripId, user.id);
+    expect(testDb.prepare('SELECT visit_status FROM places WHERE trip_id = ?').get(copied))
+      .toEqual({ visit_status: 'visited' });
+  });
+});

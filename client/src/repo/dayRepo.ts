@@ -66,6 +66,7 @@ export const dayRepo = {
       async () => {
         const trip = await offlineDb.trips.get(localTripId)
         if (!trip || trip.deleted_at || !trip.sync_id) throw new Error('Trip not found in local database')
+        if (trip.type === 'outing') throw new Error('Outings have exactly one day')
         const rows = await activeDays(localTripId)
         const position = Math.max(1, Math.min(data.position ?? rows.length + 1, rows.length + 1))
         const now = new Date().toISOString()
@@ -167,6 +168,7 @@ export const dayRepo = {
         const [trip, stored] = await Promise.all([offlineDb.trips.get(localTripId), offlineDb.days.get(id)])
         if (!trip || trip.deleted_at || !trip.sync_id) throw new Error('Trip not found in local database')
         if (!stored || stored.deleted_at || stored.trip_id !== localTripId) throw new Error('Day not found in local database')
+        if (trip.type === 'outing') throw new Error('The only outing day cannot be deleted')
         const now = new Date().toISOString()
         const deleted = { ...asLocalDay(stored, trip.sync_id), deleted_at: now, updated_at: now }
         await offlineDb.days.put(deleted)

@@ -29,6 +29,7 @@ let originalCreateObjectURL: typeof URL.createObjectURL;
 
 beforeEach(() => {
   resetAllStores();
+  useSettingsStore.setState(state => ({ settings: { ...state.settings, language: 'en' } }));
   seedStore(useAuthStore, { user: buildUser(), isAuthenticated: true });
   seedStore(useTripStore, { trip: buildTrip({ id: 1 }) });
   addToast = vi.fn<AddToast>(() => 0);

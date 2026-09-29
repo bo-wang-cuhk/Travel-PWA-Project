@@ -1,6 +1,9 @@
 import type { TranslationStrings } from '../types';
 
 const atlas: TranslationStrings = {
+  'atlas.viewMode': 'Tampilan peta',
+  'atlas.viewMode.china': 'Tiongkok',
+  'atlas.viewMode.global': 'Global',
   'atlas.subtitle': 'Jejak perjalananmu di seluruh dunia',
   'atlas.countries': 'Negara',
   'atlas.trips': 'Perjalanan',

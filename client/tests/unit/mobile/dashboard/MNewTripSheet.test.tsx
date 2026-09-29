@@ -65,6 +65,7 @@ const png = () => new File(['x'], 'cover.png', { type: 'image/png' });
 let toastCalls: Array<[string, string | undefined]>;
 
 beforeEach(() => {
+  useSettingsStore.setState(state => ({ settings: { ...state.settings, language: 'en' } }));
   toastCalls = [];
   window.__addToast = ((message: string, type?: string) => {
     toastCalls.push([message, type]);
@@ -147,6 +148,7 @@ describe('MNewTripSheet', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create New Trip' }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledWith({
+      type: 'trip',
       title: 'Iceland',
       description: 'ring road',
       start_date: null,
@@ -544,5 +546,17 @@ describe('MNewTripSheet', () => {
 
     expect(onClose).toHaveBeenCalledTimes(2);
     expect(onSave).not.toHaveBeenCalled();
+  });
+});
+
+describe('outing creation', () => {
+  it('uses one optional date and saves the outing type with a single day', async () => {
+    const onSave = vi.fn(async (_data: TripCreateRequest) => undefined);
+    render(<MNewTripSheet open trip={null} onClose={vi.fn()} onSave={onSave} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Day outing' }));
+    expect(screen.queryByLabelText('End Date')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('e.g. Summer in Japan'), { target: { value: 'Museum' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create New Trip' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ type: 'outing', day_count: 1, start_date: null, end_date: null })));
   });
 });

@@ -19,6 +19,7 @@ export interface AtlasCountry {
 }
 
 export interface AtlasStats {
+  totalOutings?: number
   totalTrips: number
   totalPlaces: number
   totalCountries: number
