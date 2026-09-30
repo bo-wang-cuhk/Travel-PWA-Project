@@ -14,7 +14,7 @@ export default function TripTypePicker({ value, onChange, disabled = false, canC
       disabled={type === 'outing' && !canChooseOuting}
       aria-pressed={value === type}
       onClick={() => onChange(type)}
-      className={`rounded-lg border px-3 py-2 text-body disabled:opacity-50 ${value === type ? 'border-accent bg-accent text-accent-on' : 'border-edge bg-surface text-content'}`}>
+      className={`rounded-lg border px-3 py-2 text-body disabled:opacity-50 ${value === type ? 'border-accent bg-accent text-accent-text' : 'border-edge bg-surface text-content'}`}>
       {t(`trip.mode.${type}`)}
     </button>)}
   </fieldset>
