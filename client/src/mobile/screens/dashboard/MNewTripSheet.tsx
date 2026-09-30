@@ -1,9 +1,12 @@
 import TripTypePicker from '../../../components/Trips/TripTypePicker'
 import type { TripType } from '@trek/shared'
 import React, { useEffect, useRef, useState } from 'react'
-import { Archive, ArchiveRestore, Camera, Search, X } from 'lucide-react'
+import { Archive, ArchiveRestore, Camera, Search, UserPlus, X } from 'lucide-react'
 import { useTranslation } from '../../../i18n'
-import { tripsApi } from '../../../api/client'
+import { authApi, tripsApi } from '../../../api/client'
+import { workspaceMembersApi } from '../../../auth/workspaceMembersApi'
+import { STANDALONE_MODE } from '../../../config/runtimeMode'
+import { useAuthStore } from '../../../store/authStore'
 import { useCanDo } from '../../../store/permissionsStore'
 import { useSettingsStore } from '../../../store/settingsStore'
 import { useToast } from '../../../components/shared/Toast'
@@ -55,6 +58,7 @@ export default function MNewTripSheet({ open, trip, onClose, onSave, onCoverUpda
   const { t } = useTranslation()
   const toast = useToast()
   const can = useCanDo()
+  const currentUser = useAuthStore(s => s.user)
   const defaultCurrency = useSettingsStore(s => s.settings.default_currency) || 'CNY'
   const fileRef = useRef<HTMLInputElement>(null)
   const coverSearchSeq = useRef(0)
@@ -77,6 +81,10 @@ export default function MNewTripSheet({ open, trip, onClose, onSave, onCoverUpda
   const [searchResults, setSearchResults] = useState<CoverSearchPhoto[]>([])
   const [searchError, setSearchError] = useState('')
   const [searching, setSearching] = useState(false)
+  const [allUsers, setAllUsers] = useState<{ id: number; username: string }[]>([])
+  const [selectedMembers, setSelectedMembers] = useState<number[]>([])
+  const [existingMembers, setExistingMembers] = useState<{ id: number; username: string }[]>([])
+  const [memberSelectValue, setMemberSelectValue] = useState('')
 
   useEffect(() => {
     if (!open) return
@@ -93,6 +101,22 @@ export default function MNewTripSheet({ open, trip, onClose, onSave, onCoverUpda
     setSearchResults([])
     setSearchError('')
     setError('')
+    setAllUsers([])
+    setSelectedMembers([])
+    setExistingMembers([])
+    setMemberSelectValue('')
+    let cancelled = false
+    if (STANDALONE_MODE) {
+      workspaceMembersApi.context().then(context => {
+        if (cancelled) return
+        setAllUsers([...context.members, ...context.candidates])
+        setExistingMembers(context.members.filter(member => member.role !== 'owner'))
+      }).catch(() => {})
+    } else {
+      authApi.listUsers().then(data => { if (!cancelled) setAllUsers(data.users || []) }).catch(() => {})
+      if (trip) tripsApi.getMembers(trip.id).then(data => { if (!cancelled) setExistingMembers(data.members || []) }).catch(() => {})
+    }
+    return () => { cancelled = true }
   }, [trip, open])
 
   // The local file preview is a blob url; release it once a new cover replaces it
@@ -133,6 +157,18 @@ export default function MNewTripSheet({ open, trip, onClose, onSave, onCoverUpda
         ...(tripType === 'outing' ? { day_count: 1 } : !startDate && !endDate && !isEditing ? { day_count: 7 } : {}),
       })
       const created = result ? result.trip : undefined
+      if (created?.id && selectedMembers.length > 0) {
+        let addFailed = false
+        for (const userId of selectedMembers) {
+          const user = allUsers.find(candidate => candidate.id === userId)
+          if (!user) continue
+          try {
+            if (STANDALONE_MODE) await workspaceMembersApi.add(user.id)
+            else await tripsApi.addMember(created.id, user.username)
+          } catch { addFailed = true }
+        }
+        if (addFailed) toast.error(t('trips.memberAddError'))
+      }
       if (pendingCoverFile && created?.id) {
         try {
           const cover = await fileRepo.saveTripCover(created.id, pendingCoverFile)
@@ -261,7 +297,7 @@ export default function MNewTripSheet({ open, trip, onClose, onSave, onCoverUpda
           </div>
         )}
 
-        <TripTypePicker value={tripType} disabled={!canEditTrip}
+        <TripTypePicker value={tripType} disabled={!canEditTrip} mobile
           canChooseOuting={!trip || trip.type === 'outing' || trip.day_count === 1}
           onChange={type => { setTripType(type); if (type === 'outing') setEndDate(startDate) }} />
         <div className={boxCls}>
@@ -325,6 +361,60 @@ export default function MNewTripSheet({ open, trip, onClose, onSave, onCoverUpda
             style={{ width: '100%', marginTop: 5 }}
           />
         </div>
+
+        {(allUsers.some(user => user.id !== currentUser?.id) || existingMembers.length > 0) && (
+          <div className="mt-3">
+            <div className="mb-[6px] flex items-center gap-[6px] text-m-faint">
+              <UserPlus size={13} />
+              <FieldLabel>{t('dashboard.addMembers')}</FieldLabel>
+            </div>
+            {(existingMembers.length > 0 || selectedMembers.length > 0) && (
+              <div className="mb-2 flex flex-wrap gap-[6px]">
+                {existingMembers.map(member => (
+                  <button key={member.id} type="button" disabled={!isEditing || member.id === currentUser?.id}
+                    onClick={async () => {
+                      try {
+                        if (STANDALONE_MODE) await workspaceMembersApi.remove(member.id)
+                        else await tripsApi.removeMember(trip!.id, member.id)
+                        setExistingMembers(previous => previous.filter(item => item.id !== member.id))
+                        toast.success(t('trips.memberRemoved', { username: member.username }))
+                      } catch { toast.error(t('trips.memberRemoveError')) }
+                    }}
+                    className="flex items-center gap-1 rounded-full border border-[color:var(--m-rowbr)] bg-[color:var(--m-ic)] px-[10px] py-[6px] text-[0.75rem] font-semibold text-m-ink">
+                    {member.username}{isEditing && member.id !== currentUser?.id && <X size={12} />}
+                  </button>
+                ))}
+                {selectedMembers.map(userId => {
+                  const user = allUsers.find(candidate => candidate.id === userId)
+                  return user && <button key={userId} type="button" onClick={() => setSelectedMembers(previous => previous.filter(id => id !== userId))}
+                    className="flex items-center gap-1 rounded-full border border-[color:var(--m-rowbr)] bg-[color:var(--m-ic)] px-[10px] py-[6px] text-[0.75rem] font-semibold text-m-ink">
+                    {user.username}<X size={12} />
+                  </button>
+                })}
+              </div>
+            )}
+            <CustomSelect value={memberSelectValue} searchable size="sm"
+              placeholder={t('dashboard.addMember')}
+              options={allUsers.filter(user => user.id !== currentUser?.id && !selectedMembers.includes(user.id) && !existingMembers.some(member => member.id === user.id))
+                .map(user => ({ value: user.id, label: user.username }))}
+              onChange={async value => {
+                const user = allUsers.find(candidate => candidate.id === Number(value))
+                if (!user) return
+                if (isEditing && trip) {
+                  try {
+                    if (STANDALONE_MODE) await workspaceMembersApi.add(user.id)
+                    else await tripsApi.addMember(trip.id, user.username)
+                    setExistingMembers(previous => [...previous, user])
+                    toast.success(t('trips.memberAdded', { username: user.username }))
+                  } catch { toast.error(t('trips.memberAddError')) }
+                } else {
+                  setSelectedMembers(previous => previous.includes(user.id) ? previous : [...previous, user.id])
+                }
+                setMemberSelectValue('')
+              }}
+              style={{ width: '100%' }} />
+          </div>
+        )}
 
         {canUploadCover && (
           <div className="mt-2">

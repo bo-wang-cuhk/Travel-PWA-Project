@@ -217,10 +217,16 @@ describe('TripFormModal', () => {
     expect(customInput.value).toBe('14');
   });
 
-  it('FE-COMP-TRIPFORM-022: member selector not visible when editing existing trip', () => {
+  it('FE-COMP-TRIPFORM-022: editing shows directory users without a search query', async () => {
+    server.use(http.get('/api/auth/users', () => HttpResponse.json({ users: [
+      { id: 100, username: 'alice' }, { id: 101, username: 'bob' },
+    ] })));
     const trip = buildTrip({ id: 1 });
     render(<TripFormModal {...defaultProps} trip={trip} />);
-    expect(screen.queryByText('Travel buddies')).not.toBeInTheDocument();
+    await screen.findByText('Travel buddies');
+    fireEvent.click(screen.getByText('Add member').closest('button')!);
+    expect(await screen.findByRole('button', { name: 'alice' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'bob' })).toBeInTheDocument();
   });
 
   it('FE-COMP-TRIPFORM-023: member selector appears when creating and other users exist', async () => {

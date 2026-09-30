@@ -135,7 +135,7 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
       }).catch(() => {})
       if (STANDALONE_MODE) {
         workspaceMembersApi.context().then(context => {
-          setAllUsers(context.candidates)
+          setAllUsers([...context.members, ...context.candidates])
           setExistingMembers(context.members.filter(member => member.role !== 'owner'))
         }).catch(() => {})
       } else {
@@ -653,19 +653,19 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
         )}
 
         {/* Members */}
-        {allUsers.filter(u => u.id !== currentUser?.id).length > 0 && (
+        {(allUsers.some(u => u.id !== currentUser?.id) || existingMembers.length > 0) && (
           <div>
             <label className={labelCls}>
               <UserPlus className="w-3.5 h-3.5" />{t('dashboard.addMembers')}
             </label>
-            {/* Existing members (editing mode) */}
-            {isEditing && existingMembers.length > 0 && (
+            {/* Existing shared-workspace members are already included in a new trip. */}
+            {existingMembers.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mb-2">
                 {existingMembers.map(m => (
-                  <button type="button" key={m.id} disabled={m.id === currentUser?.id}
+                  <button type="button" key={m.id} disabled={!isEditing || m.id === currentUser?.id}
                     className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-body font-medium bg-surface text-content border border-edge"
                     onClick={async () => {
-                      if (m.id === currentUser?.id) return
+                      if (!isEditing || m.id === currentUser?.id) return
                       try {
                         if (STANDALONE_MODE) await workspaceMembersApi.remove(m.id)
                         else await tripsApi.removeMember(trip!.id, m.id)
@@ -673,9 +673,9 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
                         toast.success(t('trips.memberRemoved', { username: m.username }))
                       } catch { toast.error(t('trips.memberRemoveError')) }
                     }}
-                    style={{ cursor: m.id === currentUser?.id ? 'default' : 'pointer' }}>
+                    style={{ cursor: !isEditing || m.id === currentUser?.id ? 'default' : 'pointer' }}>
                     {m.username}
-                    {m.id !== currentUser?.id && <X size={11} className="text-content-faint" />}
+                    {isEditing && m.id !== currentUser?.id && <X size={11} className="text-content-faint" />}
                   </button>
                 ))}
               </div>

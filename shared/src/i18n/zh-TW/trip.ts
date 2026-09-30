@@ -2,7 +2,7 @@ import type { TranslationStrings } from '../types';
 
 const trip: TranslationStrings = {
   'trip.mode.trip': '旅行',
-  'trip.mode.outing': '單日出遊',
+  'trip.mode.outing': '活動',
   'trip.mode.label': '類型',
 
   'trip.tabs.plan': '計劃',

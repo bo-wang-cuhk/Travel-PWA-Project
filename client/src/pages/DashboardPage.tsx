@@ -1,4 +1,3 @@
-import TripModeFilter from '../components/Trips/TripModeFilter'
 import React, { useEffect, useState } from 'react'
 import { useTranslation } from '../i18n'
 import Navbar from '../components/Layout/Navbar'
@@ -118,7 +117,7 @@ function DashboardPageDesktop(): React.ReactElement {
     demoMode, locale, t, navigate,
     spotlight, heroBundle, stats, upcoming, gridTrips, isLoading,
     loadError, retryLoad,
-    tripMode, setTripMode, tripFilter, setTripFilter, viewMode, toggleViewMode,
+    tripFilter, setTripFilter, viewMode, toggleViewMode,
     showForm, setShowForm, editingTrip, setEditingTrip,
     deleteTrip, setDeleteTrip, copyTrip, setCopyTrip, applyCoverUpdate,
     handleCreate, handleUpdate, confirmDelete, handleArchive, handleUnarchive, confirmCopy,
@@ -189,7 +188,6 @@ function DashboardPageDesktop(): React.ReactElement {
             <AtlasStats stats={stats} />
 
             <section>
-              <TripModeFilter value={tripMode} onChange={setTripMode} />
               <div className="sec-head">
                 <h3 className="sec-title">{t('dashboard.title')}</h3>
                 <div className="sec-tools">

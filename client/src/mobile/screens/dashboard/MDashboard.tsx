@@ -1,4 +1,3 @@
-import TripModeFilter from '../../../components/Trips/TripModeFilter'
 import React, { useEffect, useState } from 'react'
 import {
   Archive, ArchiveRestore, ArrowRight, Bell, CalendarDays, CalendarPlus, Copy,
@@ -59,7 +58,7 @@ export default function MDashboard(): React.ReactElement {
   const {
     demoMode, locale, t, navigate,
     spotlight, upcoming, gridTrips, isLoading, loadError, retryLoad,
-    tripMode, setTripMode, tripFilter, setTripFilter, viewMode, toggleViewMode,
+    tripFilter, setTripFilter, viewMode, toggleViewMode,
     showForm, setShowForm, editingTrip, setEditingTrip,
     deleteTrip, setDeleteTrip, copyTrip, setCopyTrip, applyCoverUpdate,
     handleCreate, handleUpdate, confirmDelete, handleArchive, handleUnarchive, confirmCopy,
@@ -134,7 +133,6 @@ export default function MDashboard(): React.ReactElement {
     }
     return (
       <>
-        <TripModeFilter value={tripMode} onChange={setTripMode} />
         <div className="mt-[14px] flex items-center gap-[7px]">
           {/* The chips scroll inside their own box on narrow viewports or large
               system font scales; without it this row was the widest thing on

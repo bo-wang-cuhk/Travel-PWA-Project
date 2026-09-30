@@ -1,4 +1,3 @@
-import type { TripModeFilterValue } from '../../components/Trips/TripModeFilter'
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { tripsApi, authApi, reservationsApi } from '../../api/client'
@@ -36,7 +35,6 @@ export function useDashboard() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => (localStorage.getItem('trek_dashboard_view') as 'grid' | 'list') || 'grid')
   const [deleteTrip, setDeleteTrip] = useState<DashboardTrip | null>(null)
   const [copyTrip, setCopyTrip] = useState<DashboardTrip | null>(null)
-  const [tripMode, setTripMode] = useState<TripModeFilterValue>('all')
   const [tripFilter, setTripFilter] = useState<'planned' | 'archive' | 'completed'>('planned')
   const [allSubOpen, setAllSubOpen] = useState<boolean>(false)
   const [loadError, setLoadError] = useState<boolean>(false)
@@ -118,7 +116,7 @@ export function useDashboard() {
   // A trip the hero features on its own merit: one that is running, else the next
   // one coming up. Only that one is taken out of the grid below, so the same trip
   // isn't shown twice.
-  const matchingTrips = trips.filter(trip => tripMode === 'all' || (trip.type ?? 'trip') === tripMode)
+  const matchingTrips = trips
   const featured = matchingTrips.find(t => t.start_date && t.end_date && t.start_date <= today && t.end_date >= today)
     || matchingTrips.find(t => t.start_date && t.start_date >= today)
     || null
@@ -235,7 +233,7 @@ export function useDashboard() {
     setArchivedTrips(patch)
   }
 
-  const gridTrips = tripFilter === 'archive' ? archivedTrips.filter(trip => tripMode === 'all' || (trip.type ?? 'trip') === tripMode)
+  const gridTrips = tripFilter === 'archive' ? archivedTrips
     : tripFilter === 'completed' ? rest.filter(t => getTripStatus(t) === 'past')
     : rest.filter(t => getTripStatus(t) !== 'past')
 
@@ -246,7 +244,7 @@ export function useDashboard() {
     spotlight, heroBundle, stats, upcoming, gridTrips, isLoading,
     loadError: loadError || authCheckFailed, retryLoad,
     // ui state
-    tripMode, setTripMode, tripFilter, setTripFilter, viewMode, toggleViewMode,
+    tripFilter, setTripFilter, viewMode, toggleViewMode,
     showForm, setShowForm, editingTrip, setEditingTrip,
     deleteTrip, setDeleteTrip, copyTrip, setCopyTrip, applyCoverUpdate,
     allSubOpen, setAllSubOpen,
